@@ -234,7 +234,9 @@ async function getJSON(u){const r=await fetch(u);if(!r.ok)throw new Error(r.stat
 const map=L.map("map",{zoomControl:false,attributionControl:true}).setView([13.2,101],6);
 L.control.zoom({position:"bottomright"}).addTo(map);
 const dark=matchMedia("(prefers-color-scheme: dark)").matches;
-L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark?"dark_all":"light_all"}/{z}/{x}/{y}{r}.png`,{subdomains:"abcd",maxZoom:18,attribution:"© OpenStreetMap © CARTO"}).addTo(map);
+const esri=n=>`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${n}/MapServer/tile/{z}/{y}/{x}`;
+L.tileLayer(esri(dark?"World_Dark_Gray_Base":"World_Light_Gray_Base"),{maxZoom:16,attribution:"แผนที่ © Esri"}).addTo(map);
+L.tileLayer(esri(dark?"World_Dark_Gray_Reference":"World_Light_Gray_Reference"),{maxZoom:16,pane:"shadowPane"}).addTo(map);
 map.attributionControl.addAttribution("พยากรณ์ Open-Meteo, GloFAS | เส้นทาง OSRM");
 
 /* ---------- data ---------- */
@@ -253,7 +255,7 @@ async function loadAll(){
       return m>1?Math.max(...fut)/m:null;}):PROV.map(()=>null);
     $("#upd").textContent="อัปเดต "+new Date().toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})+" น.";
     renderAll();
-  }catch(e){$("#upd").textContent="หน้านี้ดึงข้อมูลพยากรณ์และแผนที่สดจากภายนอกไม่ได้ ใช้งานจริงได้เมื่อ deploy ขึ้น Vercel";$("#sumHead").textContent="ยังไม่มีข้อมูลพยากรณ์";}
+  }catch(e){$("#upd").textContent="โหลดพยากรณ์ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วกดรีเฟรช";}
   b.disabled=false;
 }
 function stat(p,day){
@@ -278,15 +280,19 @@ function renderSummary(){
 }
 function renderMap(){
   if(S.layer)S.layer.remove();S.layer=L.layerGroup().addTo(map);
+  const rp=S.routeData?S.routeData.rt.coords.filter((c,i,a)=>i%Math.max(1,Math.floor(a.length/300))===0):null;
   PROV.forEach(p=>{
     const s=stat(p,S.day);
+    const off=rp&&!rp.some(c=>hav(p.lat,p.lon,c[0],c[1])<40);
     const color=S.mode==="risk"?LVC[s.lv]:`rgba(76,155,232,${Math.min(1,.25+s.mm/60)})`;
-    const r=S.mode==="risk"?7+s.lv*3:5+Math.min(16,Math.sqrt(s.mm)*2.2);
-    L.circleMarker([p.lat,p.lon],{radius:r,color:"#fff",weight:1.5,fillColor:color,fillOpacity:.9})
+    let r=S.mode==="risk"?7+s.lv*3:5+Math.min(16,Math.sqrt(s.mm)*2.2);
+    if(off)r=Math.max(3,r*.4);
+    L.circleMarker([p.lat,p.lon],{radius:r,color:off?"rgba(255,255,255,.35)":"#fff",weight:off?.6:1.5,fillColor:color,fillOpacity:off?.25:.9})
       .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`)
       .on("click",()=>{openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer);
   });
-  $("#legend").innerHTML=S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]}"></i>${l}</span>`).join(""):`<span>วงใหญ่และเข้ม = ฝนมาก (มม./วัน)</span>`;
+  if(S.routeLayer)S.routeLayer.eachLayer(l=>l.bringToFront&&l.bringToFront());
+  $("#legend").innerHTML=(rp?`<span>วงจาง = นอกเส้นทาง</span>`:"")+(S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]}"></i>${l}</span>`).join(""):`<span>วงใหญ่และเข้ม = ฝนมาก (มม./วัน)</span>`);
 }
 function renderList(){
   const regs=["ทั้งหมด","เหนือ","กลาง","ตะวันตก","ตะวันออก","อีสาน","ใต้"];
@@ -385,7 +391,7 @@ function drawTrip(){
     :`<div class="alert ok"><b>ไม่น่าจะเจอฝน</b> ตลอดเส้นทางถ้าออกเวลานี้</div>`;
   const bestHtml=best&&best.hr!==+tm.slice(0,2)?`<div class="alert ok">เวลาออกที่เจอฝนน้อยที่สุดของวันนี้คือ <b>${String(best.hr).padStart(2,"0")}:00 น.</b> <button class="btn" id="useBest" style="margin-left:6px;padding:3px 10px">ใช้เวลานี้</button></div>`:"";
   $("#trip").innerHTML=`<div class="card">
-    <h3>${fromName} ถึง ${toName}</h3>
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:start"><h3>${fromName} ถึง ${toName}</h3><button class="btn" id="clearRt" style="padding:3px 10px;font-size:.85rem">ล้างเส้นทาง</button></div>
     <div class="meta">${Math.round(rt.km)} กม. ออก ${hhmm(dep)} น. ถึงประมาณ ${hhmm(arrive)} น. (${Math.floor(rt.sec/3600)} ชม. ${Math.round(rt.sec%3600/60)} นาที)${rt.approx?" · ระยะทางโดยประมาณ":""}</div>
     ${sumHtml}${bestHtml}${chart}
     ${miss?`<p class="hint">บางช่วงเกินระยะพยากรณ์ที่มี จะแสดงเป็น "ไม่มีข้อมูล"</p>`:""}
@@ -394,9 +400,10 @@ function drawTrip(){
       <span class="mm">${r.nodata?"ไม่มีข้อมูล":`${wIcon(r.c,r.mm)} <b>${r.mm.toFixed(1)}</b> มม./ชม.<br><small>โอกาส ${r.pr}%</small>`}</span></li>`).join("")}</ul>
   </div>`;
   $("#trip").querySelectorAll("rect[data-hr]").forEach(el=>el.onclick=()=>{$("#ttime").value=String(el.dataset.hr).padStart(2,"0")+":00";drawTrip()});
+  $("#clearRt").onclick=()=>{S.routeData=null;if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;renderMap();$("#trip").innerHTML=`<p class="hint">เลือกต้นทาง ปลายทาง และเวลาออก แล้วกดตรวจฝนตลอดเส้นทาง</p>`;map.setView([13.2,101],6)};
   const ub=$("#useBest");if(ub)ub.onclick=()=>{$("#ttime").value=String(best.hr).padStart(2,"0")+":00";drawTrip()};
   // map
-  if(S.routeLayer)S.routeLayer.remove();S.routeLayer=L.layerGroup().addTo(map);
+  if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;renderMap();S.routeLayer=L.layerGroup().addTo(map);
   L.polyline(pts.length?S.routeData.rt.coords:[],{color:"#000",weight:8,opacity:.35}).addTo(S.routeLayer);
   for(let i=0;i<res.length-1;i++){const r=res[i];const seg=S.routeData.rt.coords.slice(r.idx,res[i+1].idx+2);
     const col=r.nodata?"#888":r.mm>=5?"#D9313A":r.mm>=1?"#E06B24":wet(r)?"#D9A21B":"#3E9B6B";
