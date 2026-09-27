@@ -120,7 +120,23 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .src a{color:var(--brand2)}
 
 /* map controls */
-.mapctl{position:absolute;top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;z-index:500;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.msearch.acw{position:absolute;top:calc(env(safe-area-inset-top,0px) + 10px);left:10px;right:10px;z-index:600}
+.msearch input{width:100%;border:1px solid #4a3d34;background:rgba(22,17,14,.94);color:#fff;border-radius:999px;padding:10px 40px 10px 16px;font-size:16px;box-shadow:0 2px 10px rgba(0,0,0,.4)}
+.msearch input::placeholder{color:#b8aca2}
+.msearch .x{position:absolute;right:8px;top:6px;border:0;background:none;color:#fff;font-size:18px;padding:4px 8px;cursor:pointer;display:none}
+.acw{position:relative}
+.acl{list-style:none;margin:4px 0 0;padding:4px 0;position:absolute;left:0;right:0;top:100%;z-index:700;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);max-height:300px;overflow-y:auto;display:none}
+.msearch .acl{background:#1F1915;color:#F3EDE7;border-color:#3B312A}
+.acl.on{display:block}
+.acl li{padding:8px 12px;cursor:pointer;line-height:1.35}
+.acl li:hover,.acl li.hl{background:var(--soft)}
+.msearch .acl li:hover,.msearch .acl li.hl{background:#2A221C}
+.acl li small{display:block;color:var(--muted);font-size:.78rem}
+.acl li.msg{color:var(--muted);cursor:default;font-size:.85rem}
+.acw input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:16px}
+.acw .cap{font-size:.8rem;color:var(--muted);display:block;margin-bottom:3px}
+.spotbtns{display:flex;gap:8px;margin-top:10px}.spotbtns .btn{flex:1}
+.mapctl{position:absolute;top:calc(env(safe-area-inset-top,0px) + 62px);right:10px;z-index:500;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .mapctl .btn{background:rgba(22,17,14,.88);color:#fff;border-color:#4a3d34;backdrop-filter:blur(4px)}
 .mapctl .btn[aria-pressed="true"]{background:var(--brand);border-color:var(--brand)}
 .mapwrap{position:relative;height:100%}
@@ -176,8 +192,8 @@ body.mapfull{overflow:hidden}
 
       <section class="pane on" id="p-trip">
         <div class="form">
-          <label>ต้นทาง<select id="from"></select></label>
-          <label>ปลายทาง<select id="to"></select></label>
+          <div class="acw full"><span class="cap">ต้นทาง</span><input id="from" autocomplete="off" placeholder="พิมพ์ที่อยู่ สถานที่ หรือจังหวัด"><ul class="acl"></ul></div>
+          <div class="acw full"><span class="cap">ปลายทาง</span><input id="to" autocomplete="off" placeholder="พิมพ์ที่อยู่ สถานที่ หรือจังหวัด"><ul class="acl"></ul></div>
           <label>วันเดินทาง<select id="tday"></select></label>
           <label>เวลาออก<input type="time" id="ttime" value="07:00" step="900"></label>
           <label class="full">ความเร็วเฉลี่ย (รวมพัก)
@@ -205,6 +221,7 @@ body.mapfull{overflow:hidden}
 
   <div class="mapwrap">
     <div id="map" aria-label="แผนที่ความเสี่ยงฝนและน้ำท่วม"></div>
+    <div class="msearch acw"><input id="msq" type="text" placeholder="🔍 ค้นหาสถานที่ ที่อยู่ ร้าน ปั๊ม…" autocomplete="off" enterkeyhint="search" aria-label="ค้นหาสถานที่"><button class="x" id="msx" aria-label="ล้างคำค้นหา">✕</button><ul class="acl"></ul></div>
     <div class="mapctl">
       <button class="btn" id="fullBtn" aria-pressed="false" title="ขยายแผนที่เต็มจอ">⛶ เต็มจอ</button>
       <button class="btn" id="modeBtn" aria-pressed="false">แสดงปริมาณฝน</button>
@@ -245,7 +262,7 @@ const dark=matchMedia("(prefers-color-scheme: dark)").matches;
 const esri=n=>`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${n}/MapServer/tile/{z}/{y}/{x}`;
 L.tileLayer(esri(dark?"World_Dark_Gray_Base":"World_Light_Gray_Base"),{maxZoom:16,attribution:"แผนที่ © Esri"}).addTo(map);
 L.tileLayer(esri(dark?"World_Dark_Gray_Reference":"World_Light_Gray_Reference"),{maxZoom:16,pane:"shadowPane"}).addTo(map);
-map.attributionControl.addAttribution("พยากรณ์ Open-Meteo, GloFAS | เส้นทาง OSRM");
+map.attributionControl.addAttribution("พยากรณ์ Open-Meteo, GloFAS | เส้นทาง OSRM | ค้นหา Photon/OSM");
 
 /* ---------- data ---------- */
 async function loadAll(){
@@ -327,12 +344,64 @@ function setTab(t){
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setTab(b.dataset.p));
 
 /* ---------- trip ---------- */
+const pl=p=>({name:p.name,lat:p.lat,lon:p.lon});
+function setEnd(which,place){S[which]=place;$("#"+which).value=place?place.name:""}
 function fillSelects(){
-  const opts=[...PROV].sort((a,b)=>a.name.localeCompare(b.name,"th")).map(p=>`<option value="${p.i}">${p.name}</option>`).join("");
-  $("#from").innerHTML=`<option value="me">📍 ตำแหน่งของฉัน</option>`+opts;$("#to").innerHTML=opts;
-  $("#from").value=String(PROV.findIndex(p=>p.name==="ชัยนาท"));$("#to").value=String(PROV.findIndex(p=>p.name==="เชียงใหม่"));
+  setEnd("from",pl(PROV.find(p=>p.name==="ชัยนาท")));setEnd("to",pl(PROV.find(p=>p.name==="เชียงใหม่")));
   fillDays();
 }
+/* ---------- place search (Photon / OpenStreetMap) ---------- */
+async function searchPlaces(q){
+  const qq=q.trim().toLowerCase();
+  const local=PROV.filter(p=>p.name.toLowerCase().includes(qq)).slice(0,4).map(p=>({name:p.name,sub:"จังหวัด (ตัวเมือง)",lat:p.lat,lon:p.lon}));
+  let remote=[];
+  try{
+    const j=await getJSON(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lat=13.75&lon=100.5&bbox=97.3,5.5,105.7,20.5`);
+    remote=j.features.map(f=>{const pr=f.properties;const sub=[pr.street,pr.district,pr.city||pr.county,pr.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i&&v!==pr.name).join(", ");
+      return{name:pr.name||[pr.street,pr.housenumber].filter(Boolean).join(" ")||sub,sub,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}}).filter(x=>x.name);
+  }catch(e){
+    try{const j=await getJSON(`https://nominatim.openstreetmap.org/search?format=json&limit=6&countrycodes=th&accept-language=th&q=${encodeURIComponent(q)}`);
+      remote=j.map(x=>{const parts=x.display_name.split(", ");return{name:parts[0],sub:parts.slice(1,4).join(", "),lat:+x.lat,lon:+x.lon}})}catch(e2){}
+  }
+  return local.concat(remote);
+}
+function attachAC(input,onPick,opt={}){
+  const list=input.parentElement.querySelector(".acl");let items=[],hl=-1,timer=null,seq=0;
+  const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const show=(arr,msg)=>{items=arr;hl=-1;
+    list.innerHTML=(msg?`<li class="msg">${msg}</li>`:"")+arr.map((x,i)=>`<li data-i="${i}">${esc(x.name)}${x.sub?`<small>${esc(x.sub)}</small>`:""}</li>`).join("");
+    list.classList.toggle("on",!!(arr.length||msg));
+    list.querySelectorAll("li[data-i]").forEach(li=>li.onmousedown=e=>{e.preventDefault();pick(items[+li.dataset.i])});};
+  const base=()=>opt.me?[{name:"📍 ตำแหน่งของฉัน",sub:"ใช้ GPS ของเครื่อง",me:true}]:[];
+  const pick=x=>{list.classList.remove("on");input.value=x.me?"ตำแหน่งของฉัน":x.name;input.blur();onPick(x)};
+  input.addEventListener("focus",()=>{input.select();if(!input.value.trim()||opt.me)show(base())});
+  input.addEventListener("input",()=>{
+    clearTimeout(timer);const q=input.value.trim();if(opt.onType)opt.onType(q);
+    if(q.length<2){show(base());return}
+    show(base(),"กำลังค้นหา…");
+    timer=setTimeout(async()=>{const my=++seq;const r=await searchPlaces(q);if(my!==seq)return;
+      show(base().concat(r),r.length?"":"ไม่พบสถานที่ ลองพิมพ์ชื่ออื่น หรือใส่ชื่ออำเภอ/จังหวัดต่อท้าย")},380);
+  });
+  input.addEventListener("keydown",e=>{
+    const lis=list.querySelectorAll("li[data-i]");
+    if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();if(!lis.length)return;hl=(hl+(e.key==="ArrowDown"?1:-1)+lis.length)%lis.length;lis.forEach((l,i)=>l.classList.toggle("hl",i===hl))}
+    else if(e.key==="Enter"){e.preventDefault();const x=items[hl>=0?hl:(items[0]&&items[0].me&&items.length>1?1:0)];if(x)pick(x)}
+    else if(e.key==="Escape"){list.classList.remove("on");input.blur()}
+  });
+  input.addEventListener("blur",()=>setTimeout(()=>{list.classList.remove("on");if(opt.onBlur)opt.onBlur()},150));
+}
+attachAC($("#from"),x=>{S.from=x.me?{name:"ตำแหน่งของฉัน",me:true}:x},{me:true,onBlur:()=>{if(S.from)$("#from").value=S.from.name}});
+attachAC($("#to"),x=>{S.to=x},{onBlur:()=>{if(S.to)$("#to").value=S.to.name}});
+let searchMk=null;
+attachAC($("#msq"),x=>{
+  if(x.me){$("#locBtn").click();return}
+  if(searchMk)searchMk.remove();
+  searchMk=L.marker([x.lat,x.lon]).addTo(map).bindTooltip(x.name);
+  map.setView([x.lat,x.lon],Math.max(map.getZoom(),12));
+  if(document.body.classList.contains("mapfull"))setFull(false);
+  openSpot(x.lat,x.lon,x.name);setTab("spot");$("#msx").style.display="block";
+},{me:true,onType:q=>{$("#msx").style.display=q?"block":"none"}});
+$("#msx").onclick=()=>{$("#msq").value="";$("#msx").style.display="none";if(searchMk){searchMk.remove();searchMk=null}};
 function fillDays(){
   const base=new Date(Date.now()+7*3600e3);const cur=$("#tday").value;
   $("#tday").innerHTML=[0,1,2].map(i=>{const d=new Date(base.getTime()+i*864e5).toISOString().slice(0,10);return `<option value="${d}">${DAYN[i]} ${fmtDate(d,{day:"numeric",month:"short"})}</option>`}).join("");
@@ -360,10 +429,10 @@ function sampleRoute(coords,totalKm){
 async function planTrip(){
   const go=$("#go");go.disabled=true;go.textContent="กำลังคำนวณเส้นทางและฝนรายชั่วโมง…";
   try{
-    let a;const fv=$("#from").value;
-    if(fv==="me"){a=await new Promise((r,j)=>locate(r,j));}else{const p=PROV[+fv];a=[p.lat,p.lon];}
-    const bp=PROV[+$("#to").value],b=[bp.lat,bp.lon];
-    const fromName=fv==="me"?"ตำแหน่งของฉัน":PROV[+fv].name;
+    if(!S.from||!S.to){alert("พิมพ์ต้นทางและปลายทาง แล้วเลือกจากรายการที่ขึ้นมา");throw 0}
+    let a;if(S.from.me){a=await new Promise((r,j)=>locate(r,j));}else a=[S.from.lat,S.from.lon];
+    const bp=S.to,b=[bp.lat,bp.lon];
+    const fromName=S.from.name;
     const rt=await getRoute(a,b);rt.sec*=+$("#speed").value;
     const pts=sampleRoute(rt.coords,rt.km);
     const w=await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p=>p.lat.toFixed(3)).join(",")}&longitude=${pts.map(p=>p.lon.toFixed(3)).join(",")}&hourly=precipitation,precipitation_probability,weather_code&forecast_days=4&timezone=Asia%2FBangkok`);
@@ -443,7 +512,11 @@ async function openSpot(lat,lon,name){
       <div class="chart"><div class="cap">ฝนรายชั่วโมง 24 ชม. ข้างหน้า</div><div class="hbars">${hs.map(v=>`<i style="height:${Math.max(2,v/mx*100)}%" title="${v} มม."></i>`).join("")}</div>
       <div class="meta" style="display:flex;justify-content:space-between"><span>ตอนนี้</span><span>+12 ชม.</span><span>+24 ชม.</span></div></div>
       ${rainyHr.length?`<div class="alert">ช่วงที่ฝนตก: ${rainyHr.slice(0,8).map(x=>`${x.t} น. (${x.mm} มม.)`).join(", ")}${rainyHr.length>8?" …":""}</div>`:`<div class="alert ok">24 ชม. ข้างหน้าไม่น่ามีฝน</div>`}
+      <div class="spotbtns"><button class="btn" id="asFrom">ตั้งเป็นต้นทาง</button><button class="btn primary" id="asTo">ไปที่นี่</button></div>
     </div>`;
+    const here={name:title,lat,lon};
+    $("#asFrom").onclick=()=>{setEnd("from",here);setTab("trip")};
+    $("#asTo").onclick=()=>{setEnd("to",here);setTab("trip");planTrip()};
   }catch(e){$("#spot").innerHTML=`<div class="alert">โหลดพยากรณ์ของจุดนี้ไม่สำเร็จ ลองแตะใหม่อีกครั้ง</div>`}
 }
 map.on("click",e=>{openSpot(e.latlng.lat,e.latlng.lng,null);setTab("spot")});
