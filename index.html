@@ -269,6 +269,7 @@ body.mapfull{overflow:hidden}
     <div id="map" aria-label="แผนที่ความเสี่ยงฝนและน้ำท่วม"></div>
     <div class="msearch acw"><input id="msq" type="text" placeholder="🔍 ค้นหาสถานที่ ที่อยู่ ร้าน ปั๊ม…" autocomplete="off" enterkeyhint="search" aria-label="ค้นหาสถานที่"><button class="x" id="msx" aria-label="ล้างคำค้นหา">✕</button><ul class="acl"></ul></div>
     <div class="mapctl">
+      <button class="btn" id="resetBtn" style="display:none" title="ล้างเส้นทางและกลับไปดูทั้งประเทศ">↺ ทั้งประเทศ</button>
       <button class="btn" id="fullBtn" aria-pressed="false" title="ขยายแผนที่เต็มจอ">⛶ เต็มจอ</button>
       <button class="btn" id="modeBtn" aria-pressed="false">แสดงปริมาณฝน</button>
       <button class="btn" id="radarBtn" aria-pressed="false">เรดาร์</button>
@@ -578,6 +579,23 @@ function attachAC(input,onPick,opt={}){
 attachAC($("#from"),x=>{S.from=x.me?{name:"ตำแหน่งของฉัน",me:true}:x},{me:true,onBlur:()=>{if(S.from)$("#from").value=S.from.name}});
 attachAC($("#to"),x=>{S.to=x},{onBlur:()=>{if(S.to)$("#to").value=S.to.name}});
 let searchMk=null;
+const HOME=[13.2,101],HOMEZ=6;
+function resetView(){
+  map.eachLayer(l=>{if(l.closePopup)l.closePopup()});map.closePopup();
+  S.routeData=null;if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;
+  if(searchMk){searchMk.remove();searchMk=null}if(S.spotMk){S.spotMk.remove();S.spotMk=null}
+  $("#msq").value="";$("#msx").style.display="none";
+  $("#trip").innerHTML=`<p class="hint">เลือกต้นทาง ปลายทาง และเวลาออก แล้วกดตรวจฝนตลอดเส้นทาง</p>`;
+  renderMap();map.setView(HOME,HOMEZ);updReset();
+}
+function updReset(){
+  const c=map.getCenter(),away=map.getZoom()!==HOMEZ||hav(c.lat,c.lng,HOME[0],HOME[1])>60;
+  const b=$("#resetBtn");b.style.display=(S.routeData||away)?"":"none";
+  b.textContent=S.routeData?"↺ ล้างเส้นทาง":"↺ ทั้งประเทศ";
+  b.title=S.routeData?"ล้างเส้นทางแล้วกลับไปดูทั้งประเทศ":"กลับไปดูทั้งประเทศ";
+}
+$("#resetBtn").onclick=resetView;
+map.on("moveend",updReset);
 attachAC($("#msq"),x=>{
   if(x.me){$("#locBtn").click();return}
   if(searchMk)searchMk.remove();
@@ -715,10 +733,10 @@ function drawTrip(){
       <span class="mm">${r.nodata?"ไม่มีข้อมูล":`${wIcon(r.c,r.mm)} <b>${r.mm.toFixed(1)}</b> มม./ชม.<br><small>โอกาส ${r.pr}%</small>`}</span></li>`).join("")}</ul>
   </div>`;
   $("#trip").querySelectorAll("rect[data-hr]").forEach(el=>el.onclick=()=>{$("#ttime").value=String(el.dataset.hr).padStart(2,"0")+":00";drawTrip()});
-  $("#clearRt").onclick=()=>{S.routeData=null;if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;renderMap();$("#trip").innerHTML=`<p class="hint">เลือกต้นทาง ปลายทาง และเวลาออก แล้วกดตรวจฝนตลอดเส้นทาง</p>`;map.setView([13.2,101],6)};
+  $("#clearRt").onclick=resetView;
   const ub=$("#useBest");if(ub)ub.onclick=()=>{$("#ttime").value=String(best.hr).padStart(2,"0")+":00";drawTrip()};
   // map
-  if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;renderMap();S.routeLayer=L.layerGroup().addTo(map);
+  if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;renderMap();S.routeLayer=L.layerGroup().addTo(map);setTimeout(updReset,0);
   L.polyline(pts.length?S.routeData.rt.coords:[],{color:"#000",weight:8,opacity:.35}).addTo(S.routeLayer);
   for(let i=0;i<res.length-1;i++){const r=res[i];const seg=S.routeData.rt.coords.slice(r.idx,res[i+1].idx+2);
     const col=r.nodata?"#888":r.mm>=5?"#D9313A":r.mm>=1?"#E06B24":wet(r)?"#D9A21B":"#3E9B6B";
