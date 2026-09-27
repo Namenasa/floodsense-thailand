@@ -135,6 +135,12 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .acl li.msg{color:var(--muted);cursor:default;font-size:.85rem}
 .acw input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px;font-size:16px}
 .acw .cap{font-size:.8rem;color:var(--muted);display:block;margin-bottom:3px}
+.dchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.dchips button{flex:none;border:1px solid var(--line);background:transparent;border-radius:999px;padding:4px 12px;font-size:.84rem;cursor:pointer;white-space:nowrap}
+.dchips button[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff}
+.dnote{font-size:.82rem;color:var(--muted);margin-top:4px}
+.dnote b{color:var(--fg)}.dnote .warn{color:var(--l1)}
+#tday{min-height:40px}
 .stoprow{display:grid;grid-template-columns:1fr 100px 40px;gap:6px;align-items:end;margin-bottom:8px}
 .stoprow select{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 4px;font-size:.85rem}
 .stoprow .btn{padding:8px 0}
@@ -202,8 +208,9 @@ body.mapfull{overflow:hidden}
           <div id="stops" class="full"></div>
           <button class="btn full addstop" id="addStop" type="button">＋ เพิ่มจุดแวะ</button>
           <div class="acw full"><span class="cap">ปลายทาง</span><input id="to" autocomplete="off" placeholder="พิมพ์ที่อยู่ สถานที่ หรือจังหวัด"><ul class="acl"></ul></div>
-          <label>วันเดินทาง<select id="tday"></select></label>
+          <label>วันเดินทาง<input type="date" id="tday"></label>
           <label>เวลาออก<input type="time" id="ttime" value="07:00" step="900"></label>
+          <div class="full dinfo"><div class="dchips" id="dchips"></div><div class="dnote" id="dnote"></div></div>
           <label class="full">ความเร็วเฉลี่ย (รวมพัก)
             <select id="speed">
               <option value="1">ตามเวลาขับปกติ</option>
@@ -410,10 +417,30 @@ attachAC($("#msq"),x=>{
   openSpot(x.lat,x.lon,x.name);setTab("spot");$("#msx").style.display="block";
 },{me:true,onType:q=>{$("#msx").style.display=q?"block":"none"}});
 $("#msx").onclick=()=>{$("#msq").value="";$("#msx").style.display="none";if(searchMk){searchMk.remove();searchMk=null}};
+const FC_DAYS=16;
+const todayISO=()=>new Date(Date.now()+7*3600e3).toISOString().slice(0,10);
+const addDays=(iso,n)=>new Date(Date.parse(iso+"T00:00:00Z")+n*864e5).toISOString().slice(0,10);
+const dayDiff=iso=>Math.round((Date.parse(iso+"T00:00:00Z")-Date.parse(todayISO()+"T00:00:00Z"))/864e5);
 function fillDays(){
-  const base=new Date(Date.now()+7*3600e3);const cur=$("#tday").value;
-  $("#tday").innerHTML=[0,1,2].map(i=>{const d=new Date(base.getTime()+i*864e5).toISOString().slice(0,10);return `<option value="${d}">${DAYN[i]} ${fmtDate(d,{day:"numeric",month:"short"})}</option>`}).join("");
-  if(cur&&[...$("#tday").options].some(o=>o.value===cur))$("#tday").value=cur;
+  const t=todayISO(),el=$("#tday");el.min=t;el.max=addDays(t,365);
+  if(!el.value||el.value<t)el.value=t;
+  const dow=new Date(Date.parse(t+"T00:00:00Z")).getUTCDay();
+  const toSat=(6-dow+7)%7,toSun=(7-dow)%7;
+  const chips=[["วันนี้",0],["พรุ่งนี้",1],["มะรืน",2],[toSat===0?"เสาร์นี้ (วันนี้)":"เสาร์นี้",toSat],[toSun===0?"อาทิตย์นี้ (วันนี้)":"อาทิตย์นี้",toSun],["สัปดาห์หน้า",7]]
+    .filter((c,i,a)=>a.findIndex(x=>x[1]===c[1])===i);
+  $("#dchips").innerHTML=chips.map(([l,n])=>{const d=addDays(t,n);return `<button type="button" data-d="${d}" aria-pressed="${d===el.value}">${l} ${fmtDate(d,{day:"numeric",month:"short"})}</button>`}).join("");
+  $("#dchips").querySelectorAll("button").forEach(b=>b.onclick=()=>{el.value=b.dataset.d;dayChanged()});
+  dayNote();
+}
+function dayNote(){
+  const d=$("#tday").value;if(!d)return;const n=dayDiff(d);
+  $("#dchips").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.d===d));
+  $("#dnote").innerHTML=`<b>${fmtDate(d)}</b> · ${n===0?"วันนี้":n===1?"พรุ่งนี้":"อีก "+n+" วัน"}`+
+    (n>=FC_DAYS?` · <span class="warn">ยังไม่มีพยากรณ์ฝน (ดูได้ล่วงหน้า ${FC_DAYS} วัน) คำนวณเวลาเดินทางให้ก่อน แล้วกลับมาเช็กฝนเมื่อใกล้วัน</span>`
+     :n>7?` · <span class="warn">พยากรณ์ล่วงหน้าเกิน 7 วัน ความแม่นยำลดลง ใช้ดูแนวโน้ม</span>`:"");
+}
+function dayChanged(){
+  const el=$("#tday");if(el.value&&el.value<el.min)el.value=el.min;dayNote();if(S.routeData)drawTrip();
 }
 function locate(cb,err){
   const fail=m=>{alert(m);if(err)err(new Error(m))};
@@ -467,7 +494,7 @@ async function planTrip(){
       rt.coords.forEach((c,k)=>{const d=hav(lat,lon,c[0],c[1]);if(d<bd){bd=d;bi=k}});
       pts.push({lat,lon,km,frac:km/rt.km,idx:Math.min(bi,rt.coords.length-2),tsec:rt.tAt(km),stop:{name:st.place.name,wait:st.wait}})});
     pts.sort((x,y)=>x.km-y.km);
-    const w=await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p=>p.lat.toFixed(3)).join(",")}&longitude=${pts.map(p=>p.lon.toFixed(3)).join(",")}&hourly=precipitation,precipitation_probability,weather_code&forecast_days=4&timezone=Asia%2FBangkok`);
+    const w=await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p=>p.lat.toFixed(3)).join(",")}&longitude=${pts.map(p=>p.lon.toFixed(3)).join(",")}&hourly=precipitation,precipitation_probability,weather_code&forecast_days=16&timezone=Asia%2FBangkok`);
     const arr=Array.isArray(w)?w:[w];
     pts.forEach((p,i)=>{const h=arr[i].hourly;p.h={};h.time.forEach((t,k)=>p.h[t]={mm:h.precipitation[k]||0,pr:h.precipitation_probability[k]||0,c:h.weather_code[k]});
       p.place=p.stop?p.stop.name:nearest(p.lat,p.lon).p.name;p.km=Math.round(p.km);});
@@ -496,20 +523,20 @@ function drawTrip(){
   const valid=cands.filter(c=>c.miss<=pts.length*.2);const best=valid.length?valid.reduce((a,c)=>c.score<a.score?c:a):null;
   const maxS=Math.max(1,...cands.map(c=>c.score));
   const bw=100/Math.max(1,cands.length);
-  const chart=cands.length?`<div class="chart"><div class="cap">ถ้าออกเวลาต่างๆ จะเจอฝนมากน้อยแค่ไหน (แตะแท่งเพื่อเลือกเวลาออก)</div>
+  const chart=cands.length&&valid.length?`<div class="chart"><div class="cap">ถ้าออกเวลาต่างๆ จะเจอฝนมากน้อยแค่ไหน (แตะแท่งเพื่อเลือกเวลาออก)</div>
    <svg viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label="ปริมาณฝนสะสมตามเวลาออกเดินทาง">
    ${cands.map((c,i)=>{const h=Math.max(1,c.score/maxS*24);const on=c.hr===+tm.slice(0,2);const col=best&&c.hr===best.hr?"#3E9B6B":on?"#D2511C":"#4C9BE8";
      return `<rect data-hr="${c.hr}" x="${i*bw+bw*.12}" y="${26-h}" width="${bw*.76}" height="${h}" rx=".6" fill="${col}" opacity="${c.miss>pts.length*.2?.3:1}" style="cursor:pointer"/>
      <text x="${i*bw+bw/2}" y="32.5" font-size="2.6" text-anchor="middle" fill="currentColor" opacity=".7">${c.hr}</text>`}).join("")}
    </svg></div>`:"";
-  const sumHtml=stretches.length?`<div class="alert"><b>จะเจอฝน ${stretches.length} ช่วง</b><br>`+stretches.map(s=>`• ${hhmm(s.a.eta)}${s.b!==s.a?"–"+hhmm(s.b.eta):""} น. แถว${s.a.place}${s.b.place!==s.a.place?" ถึง "+s.b.place:""} (กม. ${s.a.km}${s.b!==s.a?"–"+s.b.km:""}) ฝนสูงสุด ${s.max.mm.toFixed(1)} มม./ชม.`).join("<br>")+`<br>ขี่ช้าลง เปิดไฟหน้า เลี่ยงทางลอดและถนนเลียบลำน้ำ</div>`
+  const sumHtml=miss===res.length?"":stretches.length?`<div class="alert"><b>จะเจอฝน ${stretches.length} ช่วง</b><br>`+stretches.map(s=>`• ${hhmm(s.a.eta)}${s.b!==s.a?"–"+hhmm(s.b.eta):""} น. แถว${s.a.place}${s.b.place!==s.a.place?" ถึง "+s.b.place:""} (กม. ${s.a.km}${s.b!==s.a?"–"+s.b.km:""}) ฝนสูงสุด ${s.max.mm.toFixed(1)} มม./ชม.`).join("<br>")+`<br>ขี่ช้าลง เปิดไฟหน้า เลี่ยงทางลอดและถนนเลียบลำน้ำ</div>`
     :`<div class="alert ok"><b>ไม่น่าจะเจอฝน</b> ตลอดเส้นทางถ้าออกเวลานี้</div>`;
-  const bestHtml=best&&best.hr!==+tm.slice(0,2)?`<div class="alert ok">เวลาออกที่เจอฝนน้อยที่สุดของวันนี้คือ <b>${String(best.hr).padStart(2,"0")}:00 น.</b> <button class="btn" id="useBest" style="margin-left:6px;padding:3px 10px">ใช้เวลานี้</button></div>`:"";
+  const bestHtml=best&&best.hr!==+tm.slice(0,2)?`<div class="alert ok">เวลาออกที่เจอฝนน้อยที่สุดของวันนั้นคือ <b>${String(best.hr).padStart(2,"0")}:00 น.</b> <button class="btn" id="useBest" style="margin-left:6px;padding:3px 10px">ใช้เวลานี้</button></div>`:"";
   $("#trip").innerHTML=`<div class="card">
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:start"><h3>${fromName} ถึง ${toName}</h3><button class="btn" id="clearRt" style="padding:3px 10px;font-size:.85rem">ล้างเส้นทาง</button></div>
     <div class="meta">${Math.round(rt.km)} กม. ออก ${hhmm(dep)} น. ถึงประมาณ ${hhmm(arrive)} น. (${Math.floor(rt.total/3600)} ชม. ${Math.round(rt.total%3600/60)} นาที${rt.nStops?` รวมแวะ ${rt.nStops} จุด พัก ${rt.wait} นาที`:""})${rt.approx?" · ระยะทางโดยประมาณ":""}</div>
     ${sumHtml}${bestHtml}${chart}
-    ${miss?`<p class="hint">บางช่วงเกินระยะพยากรณ์ที่มี จะแสดงเป็น "ไม่มีข้อมูล"</p>`:""}
+    ${miss===res.length?`<div class="alert">ยังไม่มีพยากรณ์ฝนของวันที่เลือก (ดูได้ล่วงหน้า ${FC_DAYS} วัน) เวลาผ่านแต่ละจุดคำนวณให้แล้ว กลับมากดตรวจอีกครั้งเมื่อใกล้วันเดินทาง</div>`:miss?`<p class="hint">บางช่วงเกินระยะพยากรณ์ที่มี จะแสดงเป็น "ไม่มีข้อมูล"</p>`:""}
     <ul class="tl">${res.map(r=>`<li class="${r.stop?"stop":""}"><span class="t">${hhmm(r.eta)}</span><i class="bul" style="background:${r.nodata?"#777":r.mm>=5?"#D9313A":r.mm>=1?"#E06B24":wet(r)?"#D9A21B":"#3E9B6B"}"></i>
       <span class="pl">${r.stop?"☕ แวะ "+escH(r.place):escH(r.place)}<small>กม. ${r.km}${r.stop?` · ${r.stop.wait?`พัก ${r.stop.wait} นาที ออก ${hhmm(new Date(r.eta.getTime()+r.stop.wait*60e3))} น.`:"ผ่านเฉยๆ"}`:r.frac===0?" · ออกเดินทาง":r.frac===1?" · ถึงปลายทาง":""}</small></span>
       <span class="mm">${r.nodata?"ไม่มีข้อมูล":`${wIcon(r.c,r.mm)} <b>${r.mm.toFixed(1)}</b> มม./ชม.<br><small>โอกาส ${r.pr}%</small>`}</span></li>`).join("")}</ul>
@@ -528,7 +555,8 @@ function drawTrip(){
   map.fitBounds(L.latLngBounds(S.routeData.rt.coords),{padding:[30,30]});
 }
 $("#go").onclick=planTrip;
-["#ttime","#tday","#speed"].forEach(s=>$(s).onchange=()=>{if(S.routeData){if(s==="#speed")planTrip();else drawTrip()}});
+["#ttime","#speed"].forEach(s=>$(s).onchange=()=>{if(S.routeData){if(s==="#speed")planTrip();else drawTrip()}});
+$("#tday").onchange=dayChanged;
 
 /* ---------- spot ---------- */
 async function openSpot(lat,lon,name){
