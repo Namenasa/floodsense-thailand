@@ -141,13 +141,13 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .dnote{font-size:.82rem;color:var(--muted);margin-top:4px}
 .dnote b{color:var(--fg)}.dnote .warn{color:var(--l1)}
 #tday{min-height:40px}
-.rainic span{position:absolute;left:0;top:0;transform:translate(2px,-26px);font-size:17px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));cursor:pointer}
-.rainic.big span{font-size:21px;transform:translate(2px,-30px)}
+.rainic span{position:absolute;left:0;top:0;transform:translate(0,-20px);font-size:17px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));cursor:pointer}
+.rainic.big span{font-size:21px;transform:translate(0,-24px)}
 .rainic.rt span{transform:translate(-50%,-50%);font-size:19px}
 .rainic.rt.big span{font-size:23px}
 .warnic{position:relative}
-.warnic .pulse{position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;border:3px solid #FF3B3B;box-shadow:0 0 12px #FF3B3B}
-.warnic span{position:absolute;left:0;bottom:14px;transform:translateX(-50%);background:#C4161F;color:#fff;border:1.5px solid #fff;border-radius:8px;padding:2px 8px;font:600 11.5px/1.4 var(--head);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
+.warnic .pulse{position:absolute;left:-12px;top:-12px;width:24px;height:24px;border-radius:50%;border:3px solid #FF3B3B;box-shadow:0 0 12px #FF3B3B}
+.warnic span{position:absolute;left:0;bottom:8px;transform:translateX(-50%);background:#C4161F;color:#fff;border:1.5px solid #fff;border-radius:8px;padding:2px 8px;font:600 11.5px/1.4 var(--head);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
 .warnic span::after{content:"";position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);border:5px solid transparent;border-top-color:#fff;border-bottom:0}
 .warnic span.sm{padding:0 3px;font-size:12px;background:#C4161F}
 .warnic.route span{background:#7A0E14}
@@ -341,10 +341,10 @@ function renderMap(){
     const off=rp&&!rp.some(c=>hav(p.lat,p.lon,c[0],c[1])<40);
     const color=S.mode==="risk"?LVC[s.lv]:`rgba(76,155,232,${Math.min(1,.25+s.mm/60)})`;
     const zf=Math.max(.8,Math.min(1.6,(map.getZoom()-4)/2));
-    let r=(4+s.lv*1.5)*zf;
-    if(off)r=Math.max(2.5,r*.5);
+    let r=Math.max(2.5,(4+s.lv*1.5)*zf/3);
+    if(off)r=Math.max(1.5,r*.6);
     const mk=S.mode==="risk"
-      ?L.circleMarker([p.lat,p.lon],{radius:r,color:off?"rgba(255,255,255,.35)":"#fff",weight:off?.5:1.2,fillColor:color,fillOpacity:off?.25:.9})
+      ?L.circleMarker([p.lat,p.lon],{radius:r,color:off?"rgba(255,255,255,.35)":"#fff",weight:off?.4:1,fillColor:color,fillOpacity:off?.25:.9})
       :L.marker([p.lat,p.lon],{zIndexOffset:(off?-5000:0)+Math.round(s.mm*10),icon:L.divIcon({className:"mmlbl",iconSize:null,html:`<span class="${off?"off":""}" style="background:${mmColor(s.mm)}">${Math.round(s.mm)}</span>`})});
     mk
       .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`)
