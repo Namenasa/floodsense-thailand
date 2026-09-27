@@ -125,8 +125,13 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .mapctl .btn[aria-pressed="true"]{background:var(--brand);border-color:var(--brand)}
 .mapwrap{position:relative;height:100%}
 .leaflet-container{font-family:var(--body)}
-.legend{position:absolute;left:10px;bottom:22px;z-index:500;background:rgba(22,17,14,.88);color:#fff;border-radius:10px;padding:6px 10px;font-size:.78rem;display:flex;gap:10px}
-.legend span{display:flex;align-items:center;gap:4px}
+body.mapfull .app{grid-template-columns:1fr}
+body.mapfull .side{display:none}
+body.mapfull .mapwrap{position:fixed;inset:0;height:100vh;height:100dvh;z-index:1000;margin:0}
+body.mapfull{overflow:hidden}
+#fullBtn{font-weight:600}
+.legend{position:absolute;left:10px;bottom:calc(40px + env(safe-area-inset-bottom,0px));z-index:500;background:rgba(22,17,14,.88);color:#fff;border-radius:10px;padding:6px 10px;font-size:.78rem;display:flex;gap:10px}
+.legend{flex-wrap:wrap;row-gap:2px;max-width:calc(100% - 70px)}.legend span{display:flex;align-items:center;gap:4px;white-space:nowrap}
 
 @media (max-width:820px){
   body{overflow:auto}
@@ -199,6 +204,7 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
   <div class="mapwrap">
     <div id="map" aria-label="แผนที่ความเสี่ยงฝนและน้ำท่วม"></div>
     <div class="mapctl">
+      <button class="btn" id="fullBtn" aria-pressed="false" title="ขยายแผนที่เต็มจอ">⛶ เต็มจอ</button>
       <button class="btn" id="modeBtn" aria-pressed="false">แสดงปริมาณฝน</button>
       <button class="btn" id="radarBtn" aria-pressed="false">เรดาร์</button>
       <button class="btn" id="locBtn" title="ตำแหน่งของฉัน">◎ ตำแหน่งฉัน</button>
@@ -449,6 +455,14 @@ $("#radarBtn").onclick=async()=>{
   }catch(e){alert("โหลดเรดาร์ไม่สำเร็จ ลองใหม่ภายหลัง")}
 };
 addEventListener("resize",()=>map.invalidateSize());
+function setFull(on){
+  document.body.classList.toggle("mapfull",on);
+  const b=$("#fullBtn");b.setAttribute("aria-pressed",on);b.textContent=on?"✕ ย่อแผนที่":"⛶ เต็มจอ";b.title=on?"กลับไปขนาดเดิม":"ขยายแผนที่เต็มจอ";
+  if(!on)scrollTo(0,0);
+  setTimeout(()=>{map.invalidateSize();if(S.routeLayer&&S.routeData)map.fitBounds(L.latLngBounds(S.routeData.rt.coords),{padding:[40,40]})},60);
+}
+$("#fullBtn").onclick=()=>setFull(!document.body.classList.contains("mapfull"));
+addEventListener("keydown",e=>{if(e.key==="Escape"&&document.body.classList.contains("mapfull"))setFull(false)});
 fillSelects();{const h=new Date(Date.now()+7*3600e3).getUTCHours()+1;if(h>7&&h<=20)$("#ttime").value=String(h).padStart(2,"0")+":00";}loadAll();setInterval(loadAll,30*60*1000);
 </script>
 </body>
