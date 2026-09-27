@@ -295,10 +295,11 @@ function renderMap(){
     const s=stat(p,S.day);
     const off=rp&&!rp.some(c=>hav(p.lat,p.lon,c[0],c[1])<40);
     const color=S.mode==="risk"?LVC[s.lv]:`rgba(76,155,232,${Math.min(1,.25+s.mm/60)})`;
-    let r=S.mode==="risk"?7+s.lv*3:5+Math.min(16,Math.sqrt(s.mm)*2.2);
-    if(off)r=Math.max(3,r*.4);
+    const zf=Math.max(.8,Math.min(1.6,(map.getZoom()-4)/2));
+    let r=(4+s.lv*1.5)*zf;
+    if(off)r=Math.max(2.5,r*.5);
     const mk=S.mode==="risk"
-      ?L.circleMarker([p.lat,p.lon],{radius:r,color:off?"rgba(255,255,255,.35)":"#fff",weight:off?.6:1.5,fillColor:color,fillOpacity:off?.25:.9})
+      ?L.circleMarker([p.lat,p.lon],{radius:r,color:off?"rgba(255,255,255,.35)":"#fff",weight:off?.5:1.2,fillColor:color,fillOpacity:off?.25:.9})
       :L.marker([p.lat,p.lon],{zIndexOffset:(off?-5000:0)+Math.round(s.mm*10),icon:L.divIcon({className:"mmlbl",iconSize:null,html:`<span class="${off?"off":""}" style="background:${mmColor(s.mm)}">${Math.round(s.mm)}</span>`})});
     mk
       .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`)
@@ -462,6 +463,7 @@ $("#radarBtn").onclick=async()=>{
   }catch(e){alert("โหลดเรดาร์ไม่สำเร็จ ลองใหม่ภายหลัง")}
 };
 addEventListener("resize",()=>map.invalidateSize());
+map.on("zoomend",()=>{if(S.daily&&S.mode==="risk")renderMap()});
 function setFull(on){
   document.body.classList.toggle("mapfull",on);
   const b=$("#fullBtn");b.setAttribute("aria-pressed",on);b.textContent=on?"✕ ย่อแผนที่":"⛶ เต็มจอ";b.title=on?"กลับไปขนาดเดิม":"ขยายแผนที่เต็มจอ";
