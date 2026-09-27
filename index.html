@@ -326,7 +326,7 @@ async function loadAll(){
       return m>1?Math.max(...fut)/m:null;}):PROV.map(()=>null);
     $("#upd").textContent="อัปเดต "+new Date().toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})+" น.";
     renderAll();
-    if(!S.grid||Date.now()-(S.gridAt||0)>55*60e3)loadGrid().then(()=>{renderMap();renderHot()});else renderHot();
+    if(!S.grid||Date.now()-(S.gridAt||0)>55*60e3)loadGrid().then(()=>{softRender();renderHot()});else renderHot();
   }catch(e){$("#upd").textContent="โหลดพยากรณ์ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วกดรีเฟรช";}
   b.disabled=false;
 }
@@ -337,7 +337,10 @@ function stat(p,day){
 }
 
 /* ---------- render ---------- */
-function renderAll(){renderDays();renderSummary();renderMap();renderList();fillDays();}
+const popOpen=()=>!!document.querySelector(".leaflet-popup");
+function softRender(){if(popOpen()){S.pend=true;return}renderMap()}
+map.on("popupclose",()=>{setTimeout(()=>{if(!popOpen()&&S.pend){S.pend=false;renderMap()}},0)});
+function renderAll(){renderDays();renderSummary();softRender();renderList();fillDays();}
 function renderDays(){
   $("#days").innerHTML=DAYN.map((n,i)=>`<button aria-pressed="${i===S.day}" data-d="${i}">${n}</button>`).join("");
   $("#days").querySelectorAll("button").forEach(b=>b.onclick=()=>{S.day=+b.dataset.d;renderDays();renderSummary();renderMap();renderList();renderHot()});
@@ -414,7 +417,7 @@ function alertPopup(mk,o){
       :loadNews(d.querySelector(".nw"),[q]);
     Promise.all([loadHourly(d.querySelector(".hr"),o.lat,o.lon),newsP]).then(upd);setTimeout(upd,50);
     return d;
-  },{maxWidth:300,minWidth:250,autoPanPaddingTopLeft:[20,150],autoPanPaddingBottomRight:[20,60]});
+  },{maxWidth:300,minWidth:250,autoClose:false,closeOnClick:false,closeOnEscapeKey:true,autoPanPaddingTopLeft:[20,150],autoPanPaddingBottomRight:[20,60]});
 }
 async function loadHourly(el,lat,lon){
   try{
@@ -778,8 +781,8 @@ $("#radarBtn").onclick=async()=>{
   }catch(e){alert("โหลดเรดาร์ไม่สำเร็จ ลองใหม่ภายหลัง")}
 };
 addEventListener("resize",()=>map.invalidateSize());
-map.on("zoomend",()=>{if(S.daily)renderMap()});
-map.on("moveend",()=>{if(S.daily&&S.grid&&map.getZoom()>=8)renderMap()});
+map.on("zoomend",()=>{if(S.daily)softRender()});
+map.on("moveend",()=>{if(S.daily&&S.grid&&map.getZoom()>=8)softRender()});
 function setFull(on){
   document.body.classList.toggle("mapfull",on);
   const b=$("#fullBtn");b.setAttribute("aria-pressed",on);b.textContent=on?"✕ ย่อแผนที่":"⛶ เต็มจอ";b.title=on?"กลับไปขนาดเดิม":"ขยายแผนที่เต็มจอ";
