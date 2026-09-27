@@ -141,6 +141,10 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .dnote{font-size:.82rem;color:var(--muted);margin-top:4px}
 .dnote b{color:var(--fg)}.dnote .warn{color:var(--l1)}
 #tday{min-height:40px}
+.rainic span{position:absolute;left:0;top:0;transform:translate(2px,-26px);font-size:17px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));cursor:pointer}
+.rainic.big span{font-size:21px;transform:translate(2px,-30px)}
+.rainic.rt span{transform:translate(-50%,-50%);font-size:19px}
+.rainic.rt.big span{font-size:23px}
 .warnic{position:relative}
 .warnic .pulse{position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;border:3px solid #FF3B3B;box-shadow:0 0 12px #FF3B3B}
 .warnic span{position:absolute;left:0;bottom:14px;transform:translateX(-50%);background:#C4161F;color:#fff;border:1.5px solid #fff;border-radius:8px;padding:2px 8px;font:600 11.5px/1.4 var(--head);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
@@ -345,6 +349,9 @@ function renderMap(){
     mk
       .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`)
       .on("click",()=>{openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer);
+    if(s.mm>=35&&!off)L.marker([p.lat,p.lon],{zIndexOffset:1500+Math.round(s.mm),title:`${p.name} ฝนหนัก ${Math.round(s.mm)} มม.`,
+      icon:L.divIcon({className:"rainic"+(s.mm>=90?" big":""),iconSize:null,html:`<span>${s.mm>=90||s.code>=95?"⛈️":"🌧️"}</span>`})})
+      .on("click",()=>{openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer);
   });
   const crit=PROV.map(p=>({p,...stat(p,S.day)})).filter(x=>x.lv>=2&&(!rp||rp.some(c=>hav(x.p.lat,x.p.lon,c[0],c[1])<40)))
     .sort((a,b)=>b.lv-a.lv||b.mm-a.mm).slice(0,3);
@@ -352,7 +359,7 @@ function renderMap(){
       html:i===0?`<i class="pulse"></i><span>⚠️ วิกฤตสุด · ${x.p.name} ${Math.round(x.mm)} มม.</span>`:`<span class="sm">⚠️</span>`})})
     .on("click",()=>{openSpot(x.p.lat,x.p.lon,x.p.name);setTab("spot")}).addTo(S.layer));
   if(S.routeLayer)S.routeLayer.eachLayer(l=>l.bringToFront&&l.bringToFront());
-  $("#legend").innerHTML=(rp?`<span>วงจาง = นอกเส้นทาง</span>`:"")+(S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]}"></i>${l}</span>`).join(""):`<span>ตัวเลข = ฝน มม./วัน</span>`+MMS.map(x=>`<span><i class="dot" style="background:${x[1]};border-radius:3px"></i>${x[2]}</span>`).join(""));
+  $("#legend").innerHTML=`<span>🌧️ ฝนหนัก</span><span>⛈️ หนักมาก/พายุ</span>`+(rp?`<span>วงจาง = นอกเส้นทาง</span>`:"")+(S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]}"></i>${l}</span>`).join(""):`<span>ตัวเลข = ฝน มม./วัน</span>`+MMS.map(x=>`<span><i class="dot" style="background:${x[1]};border-radius:3px"></i>${x[2]}</span>`).join(""));
 }
 function renderList(){
   const regs=["ทั้งหมด","เหนือ","กลาง","ตะวันตก","ตะวันออก","อีสาน","ใต้"];
@@ -570,7 +577,10 @@ function drawTrip(){
   if(hasWorst)L.marker([worst.lat,worst.lon],{zIndexOffset:4000,icon:L.divIcon({className:"warnic route",iconSize:null,
     html:`<i class="pulse"></i><span>⚠️ หนักสุดบนเส้นทาง ${hhmm(worst.eta)} น. · ${worst.mm.toFixed(1)} มม./ชม.</span>`})}).addTo(S.routeLayer);
   res.filter(r=>r.stop).forEach((r,k)=>L.marker([r.lat,r.lon],{zIndexOffset:1000,icon:L.divIcon({className:"stopic",iconSize:null,html:`<span>${k+1}</span>`})}).bindTooltip(`แวะ ${escH(r.place)} ${hhmm(r.eta)} น.`).addTo(S.routeLayer));
-  res.filter(wet).forEach(r=>L.circleMarker([r.lat,r.lon],{radius:6,color:"#fff",weight:2,fillColor:"#D9313A",fillOpacity:1}).bindTooltip(`${hhmm(r.eta)} น. ${r.place} ฝน ${r.mm.toFixed(1)} มม./ชม.`).addTo(S.routeLayer));
+  res.filter(r=>!r.nodata&&(r.mm>=2.5||r.c>=95)&&!(hasWorst&&r===worst)).forEach(r=>L.marker([r.lat,r.lon],{zIndexOffset:2500,
+    icon:L.divIcon({className:"rainic rt"+(r.mm>=7.6||r.c>=95?" big":""),iconSize:null,html:`<span>${r.mm>=7.6||r.c>=95?"⛈️":"🌧️"}</span>`})})
+    .bindTooltip(`${hhmm(r.eta)} น. ${escH(r.place)} ฝนหนัก ${r.mm.toFixed(1)} มม./ชม.`).addTo(S.routeLayer));
+  res.filter(r=>wet(r)&&!(r.mm>=2.5||r.c>=95)).forEach(r=>L.circleMarker([r.lat,r.lon],{radius:6,color:"#fff",weight:2,fillColor:"#D9313A",fillOpacity:1}).bindTooltip(`${hhmm(r.eta)} น. ${r.place} ฝน ${r.mm.toFixed(1)} มม./ชม.`).addTo(S.routeLayer));
   map.fitBounds(L.latLngBounds(S.routeData.rt.coords),{paddingTopLeft:[30,140],paddingBottomRight:[30,70]});
 }
 $("#go").onclick=planTrip;
