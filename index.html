@@ -228,6 +228,7 @@ body.mapfull{overflow:hidden}
       </nav>
 
       <section class="pane" id="p-risk">
+        <div id="hot"></div>
         <div class="filter" id="regionF"></div>
         <div id="list"></div>
       </section>
@@ -325,6 +326,7 @@ async function loadAll(){
       return m>1?Math.max(...fut)/m:null;}):PROV.map(()=>null);
     $("#upd").textContent="อัปเดต "+new Date().toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})+" น.";
     renderAll();
+    if(!S.grid||Date.now()-(S.gridAt||0)>55*60e3)loadGrid().then(()=>{renderMap();renderHot()});else renderHot();
   }catch(e){$("#upd").textContent="โหลดพยากรณ์ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วกดรีเฟรช";}
   b.disabled=false;
 }
@@ -338,7 +340,7 @@ function stat(p,day){
 function renderAll(){renderDays();renderSummary();renderMap();renderList();fillDays();}
 function renderDays(){
   $("#days").innerHTML=DAYN.map((n,i)=>`<button aria-pressed="${i===S.day}" data-d="${i}">${n}</button>`).join("");
-  $("#days").querySelectorAll("button").forEach(b=>b.onclick=()=>{S.day=+b.dataset.d;renderDays();renderSummary();renderMap();renderList()});
+  $("#days").querySelectorAll("button").forEach(b=>b.onclick=()=>{S.day=+b.dataset.d;renderDays();renderSummary();renderMap();renderList();renderHot()});
 }
 function renderSummary(){
   const iso=S.daily[0].time[S.day];
@@ -350,6 +352,41 @@ function renderSummary(){
 }
 const MMS=[[1,"#56626B","ไม่มีฝน"],[10,"#3A7BC8","ฝนเล็กน้อย"],[35,"#1F4FB0","ฝนปานกลาง"],[90,"#7A3BC2","ฝนหนัก"],[1e9,"#C21F6E","หนักมาก"]];
 const mmColor=mm=>MMS.find(x=>mm<x[0])[1];
+/* ---------- ตารางจุดพยากรณ์ละเอียด ~25 กม. (ระดับอำเภอ) ---------- */
+const GRID=(()=>{const g=[];for(let la=5.6;la<=20.5;la+=.25)for(let lo=97.3;lo<=105.7;lo+=.25){
+  const d=nearest(la,lo).d;if(d<65)g.push({lat:+la.toFixed(3),lon:+lo.toFixed(3)})}return g})();
+async function loadGrid(){
+  const B=150,parts=[];for(let i=0;i<GRID.length;i+=B)parts.push(GRID.slice(i,i+B));
+  const out=[];
+  for(let k=0;k<parts.length;k+=3){
+    const res=await Promise.all(parts.slice(k,k+3).map(pt=>getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pt.map(x=>x.lat).join(",")}&longitude=${pt.map(x=>x.lon).join(",")}&daily=precipitation_sum,precipitation_probability_max,weather_code&forecast_days=3&timezone=Asia%2FBangkok`).then(w=>{
+      (Array.isArray(w)?w:[w]).forEach((x,i)=>{if(x&&x.daily&&(x.elevation>0.5||nearest(pt[i].lat,pt[i].lon).d<15))out.push({lat:pt[i].lat,lon:pt[i].lon,mm:x.daily.precipitation_sum,pr:x.daily.precipitation_probability_max,code:x.daily.weather_code})})}).catch(()=>{})));
+  }
+  S.grid=out;S.gridAt=Date.now();
+}
+const geoCache={};let geoQ=Promise.resolve();
+const shortAmp=a=>a.replace(/^อำเภอ\s*/,"อ.").replace(/^เขต\s*/,"เขต").replace(/^Amphoe\s*/i,"อ.");
+const shortProv=p=>p.replace(/^จังหวัด\s*/,"").replace(/^Changwat\s*/i,"");
+function geoName(lat,lon){
+  const k=lat.toFixed(2)+","+lon.toFixed(2);if(geoCache[k])return geoCache[k];
+  const fb=()=>{const p=nearest(lat,lon).p;return{amp:"",prov:p.name,label:"ใกล้ จ."+p.name}};
+  geoCache[k]=geoQ=geoQ.then(()=>new Promise(r=>setTimeout(r,1100))).then(async()=>{
+    try{const j=await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10&accept-language=th`);
+      const a=j.address||{};let prov=shortProv(a.state||a.province||(a.city==="กรุงเทพมหานคร"?"กรุงเทพมหานคร":"")||"");
+      let amp=a.county||a.city_district||a.district||a.municipality||a.town||(a.state?a.city:"")||"";
+      if(!prov){const f=fb();prov=f.prov}
+      amp=amp?shortAmp(amp):"";
+      return{amp,prov,label:amp?`${amp} จ.${prov}`:`จ.${prov}`};
+    }catch(e){return fb()}
+  });
+  return geoCache[k];
+}
+function hotspots(day,rp,n){
+  if(!S.grid)return null;
+  const c=S.grid.map(g=>({...g,d:g.mm[day]||0,p:g.pr[day]||0,c:g.code[day]})).filter(g=>g.d>=35&&(!rp||rp.some(q=>hav(g.lat,g.lon,q[0],q[1])<30))).sort((a,b)=>b.d-a.d);
+  const pick=[];for(const g of c){if(pick.every(x=>hav(x.lat,x.lon,g.lat,g.lon)>40))pick.push(g);if(pick.length>=n)break}
+  return pick;
+}
 /* ---------- alert popup (โหลดข้อมูลเฉพาะตอนแตะ) ---------- */
 const newsCache={};
 function alertPopup(mk,o){
@@ -357,10 +394,10 @@ function alertPopup(mk,o){
   mk.bindPopup(()=>{
     if(built)return built;
     const d=document.createElement("div");d.className="ap";built=d;
-    const q=o.prov;
-    d.innerHTML=`<h4>⚠️ ${escH(o.title)}</h4>${o.badge||""}<div>${o.lines}</div>
+    const q=o.prov||"กำลังระบุพื้นที่";
+    d.innerHTML=`<h4>⚠️ ${escH(o.title.replace("{name}","กำลังระบุอำเภอ…"))}</h4>${o.badge||""}<div>${o.lines}</div>
       <div class="sec"><b>ช่วงเวลาที่ฝนหนัก</b><div class="hr muted">กำลังโหลดพยากรณ์รายชั่วโมง…</div></div>
-      <div class="sec"><b>ข่าวล่าสุดแถว${escH(q)} (3 วัน)</b><div class="nw muted">กำลังค้นข่าว…</div>
+      <div class="sec"><b>ข่าวล่าสุดแถว<span class="where">${escH(q)}</span> (3 วัน)</b><div class="nw muted">กำลังค้นข่าว…</div>
         <div class="links"><a href="https://news.google.com/search?q=${encodeURIComponent("น้ำท่วม "+q)}&hl=th&gl=TH&ceid=TH:th" target="_blank" rel="noopener">ค้นข่าว Google</a>
         <a href="https://www.tmd.go.th" target="_blank" rel="noopener">ประกาศกรมอุตุฯ</a>
         <a href="https://www.thaiwater.net" target="_blank" rel="noopener">ThaiWater</a>
@@ -368,7 +405,14 @@ function alertPopup(mk,o){
       <button class="go">ดูพยากรณ์ละเอียดของจุดนี้</button>`;
     d.querySelector(".go").onclick=()=>{map.closePopup();if(document.body.classList.contains("mapfull"))setFull(false);openSpot(o.lat,o.lon,o.title);setTab("spot")};
     const upd=()=>{const pp=mk.getPopup();if(pp&&pp.isOpen())pp.update()};
-    Promise.all([loadHourly(d.querySelector(".hr"),o.lat,o.lon),loadNews(d.querySelector(".nw"),q)]).then(upd);setTimeout(upd,50);
+    const newsP=o.resolve?geoName(o.lat,o.lon).then(g=>{
+        d.querySelector("h4").textContent="⚠️ "+o.title.replace("{name}",g.label);
+        d.querySelector(".sec .where").textContent=g.amp?`${g.amp} จ.${g.prov}`:`จ.${g.prov}`;
+        const ga=d.querySelector(".links a");ga.href=`https://news.google.com/search?q=${encodeURIComponent("น้ำท่วม "+(g.amp?g.amp.replace(/^อ\./,"อำเภอ")+" ":"")+g.prov)}&hl=th&gl=TH&ceid=TH:th`;
+        o.title=o.title.replace("{name}",g.label);
+        return loadNews(d.querySelector(".nw"),[g.amp.replace(/^อ\.|^เขต/,""),g.prov].filter(Boolean));upd()})
+      :loadNews(d.querySelector(".nw"),[q]);
+    Promise.all([loadHourly(d.querySelector(".hr"),o.lat,o.lon),newsP]).then(upd);setTimeout(upd,50);
     return d;
   },{maxWidth:300,minWidth:250,autoPanPaddingTopLeft:[20,150],autoPanPaddingBottomRight:[20,60]});
 }
@@ -387,13 +431,15 @@ async function loadHourly(el,lat,lon){
       :`24 ชม. ข้างหน้าฝนเบาลง ไม่เกิน ${pk.mm.toFixed(1)} มม./ชม.`;
   }catch(e){el.textContent="โหลดพยากรณ์รายชั่วโมงไม่สำเร็จ"}
 }
-async function loadNews(el,q){
+async function loadNews(el,terms){
+  if(!Array.isArray(terms))terms=[terms];const q=terms.join("|");
   const show=a=>{el.classList.toggle("muted",!a.length);
     el.innerHTML=a.length?`<ul>${a.map(x=>`<li><a href="${escH(x.url)}" target="_blank" rel="noopener">${escH(x.title)}</a><small>${escH(x.src)} · ${escH(x.when)}</small></li>`).join("")}</ul>`
       :"ยังไม่พบข่าวน้ำท่วมหรือฝนหนักของพื้นที่นี้ใน 3 วันล่าสุด ลองกดค้นข่าว Google ด้านล่าง"};
   if(newsCache[q])return show(newsCache[q]);
   try{
-    const query=`(น้ำท่วม OR ฝนตกหนัก OR น้ำป่า OR ดินสไลด์) ${q}`;
+    const where=terms.length>1?`(${terms.map(t=>`"${t}"`).join(" OR ")})`:`"${terms[0]}"`;
+    const query=`(น้ำท่วม OR ฝนตกหนัก OR น้ำป่า OR ดินสไลด์ OR น้ำล้นตลิ่ง) ${where}`;
     const j=await getJSON(`https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=5&format=json&timespan=3d&sort=datedesc`);
     const a=(j.articles||[]).map(x=>{const t=x.seendate||"";const d=t?new Date(Date.UTC(+t.slice(0,4),+t.slice(4,6)-1,+t.slice(6,8),+t.slice(9,11),+t.slice(11,13))):null;
       return{url:x.url,title:x.title,src:x.domain,when:d?d.toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"}):""}}).slice(0,4);
@@ -416,21 +462,50 @@ function renderMap(){
     mk
       .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`)
       .on("click",()=>{openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer);
-    if(s.mm>=35&&!off)L.marker([p.lat,p.lon],{zIndexOffset:1500+Math.round(s.mm),title:`${p.name} ฝนหนัก ${Math.round(s.mm)} มม.`,
+    if(s.mm>=35&&!off&&!(S.grid&&map.getZoom()>=8))L.marker([p.lat,p.lon],{zIndexOffset:1500+Math.round(s.mm),title:`${p.name} ฝนหนัก ${Math.round(s.mm)} มม.`,
       icon:L.divIcon({className:"rainic"+(s.mm>=90?" big":""),iconSize:null,html:`<span>${s.mm>=90||s.code>=95?"⛈️":"🌧️"}</span>`})})
       .on("click",()=>{openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer);
   });
+  if(S.grid&&map.getZoom()>=8){const bb=map.getBounds().pad(.2);
+    S.grid.forEach(g=>{const mm=g.mm[S.day]||0,cd=g.code[S.day];if(mm<35||!bb.contains([g.lat,g.lon]))return;
+      if(rp&&!rp.some(q=>hav(g.lat,g.lon,q[0],q[1])<30))return;
+      L.marker([g.lat,g.lon],{zIndexOffset:1500+Math.round(mm),title:`ฝนหนัก ${Math.round(mm)} มม.`,icon:L.divIcon({className:"rainic rt"+(mm>=90?" big":""),iconSize:null,html:`<span>${mm>=90||cd>=95?"⛈️":"🌧️"}</span>`})})
+        .bindTooltip(`ฝนหนัก ${Math.round(mm)} มม./วัน`).on("click",()=>{openSpot(g.lat,g.lon,null);setTab("spot")}).addTo(S.layer)})}
+  const hs=hotspots(S.day,rp,6);
+  if(hs&&hs.length){
+    hs.forEach((g,i)=>{
+      const lbl=n=>i===0?`<i class="pulse"></i><span>⚠️ วิกฤตสุด · ${escH(n)} ${Math.round(g.d)} มม.</span>`:`<span class="sm">⚠️</span>`;
+      const mk=L.marker([g.lat,g.lon],{zIndexOffset:3000-i*200,title:`ฝน ${Math.round(g.d)} มม.`,icon:L.divIcon({className:"warnic",iconSize:null,html:lbl("กำลังระบุอำเภอ…")})}).addTo(S.layer);
+      if(i===0)geoName(g.lat,g.lon).then(n=>{if(S.layer&&S.layer.hasLayer(mk))mk.setIcon(L.divIcon({className:"warnic",iconSize:null,html:lbl(n.label)}))});
+      const lv=rainLv(g.d);
+      alertPopup(mk,{resolve:true,title:`${i===0?"วิกฤตสุด":"จุดฝนหนัก อันดับ "+(i+1)} · {name}`,lat:g.lat,lon:g.lon,
+        badge:`<span class="lv" style="background:${LVC[lv]}">${LV[lv]} · ${DAYN[S.day]}</span>`,
+        lines:`ฝนสะสมทั้งวัน <b>${Math.round(g.d)} มม.</b> โอกาสฝน ${g.p}%${g.c>=95?"<br>⛈️ มีพายุฝนฟ้าคะนอง":""}<br>คนขี่: ขี่ช้า เปิดไฟหน้า เลี่ยงทางลอด สะพานต่ำ และถนนเลียบลำน้ำ`});
+    });
+  }else{
   const crit=PROV.map(p=>({p,...stat(p,S.day)})).filter(x=>x.lv>=2&&(!rp||rp.some(c=>hav(x.p.lat,x.p.lon,c[0],c[1])<40)))
-    .sort((a,b)=>b.lv-a.lv||b.mm-a.mm).slice(0,3);
-  crit.forEach((x,i)=>{
-    const mk=L.marker([x.p.lat,x.p.lon],{zIndexOffset:3000-i*200,title:`${x.p.name} ${Math.round(x.mm)} มม.`,icon:L.divIcon({className:"warnic",iconSize:null,
-      html:i===0?`<i class="pulse"></i><span>⚠️ วิกฤตสุด · ${x.p.name} ${Math.round(x.mm)} มม.</span>`:`<span class="sm">⚠️</span>`})}).addTo(S.layer);
-    alertPopup(mk,{title:`${i===0?"วิกฤตสุด · ":"เฝ้าระวังพิเศษ · "}${x.p.name}`,prov:x.p.name,lat:x.p.lat,lon:x.p.lon,
-      badge:`<span class="lv" style="background:${LVC[x.lv]}">${LV[x.lv]} · ${DAYN[S.day]}</span>`,
-      lines:`ฝนสะสมทั้งวัน <b>${Math.round(x.mm)} มม.</b> โอกาสฝน ${x.pr}%${x.rr&&x.rr>=1.2?`<br>น้ำในลำน้ำสูงขึ้น <b>${x.rr.toFixed(1)} เท่า</b> ของสัปดาห์ก่อน`:""}<br>คนขี่: ขี่ช้า เปิดไฟหน้า เลี่ยงทางลอด สะพานต่ำ และถนนเลียบลำน้ำ`});
-  });
+      .sort((a,b)=>b.lv-a.lv||b.mm-a.mm).slice(0,3);
+    crit.forEach((x,i)=>{
+      const mk=L.marker([x.p.lat,x.p.lon],{zIndexOffset:3000-i*200,title:`${x.p.name} ${Math.round(x.mm)} มม.`,icon:L.divIcon({className:"warnic",iconSize:null,
+        html:i===0?`<i class="pulse"></i><span>⚠️ วิกฤตสุด · ${x.p.name} ${Math.round(x.mm)} มม.</span>`:`<span class="sm">⚠️</span>`})}).addTo(S.layer);
+      alertPopup(mk,{title:`${i===0?"วิกฤตสุด · ":"เฝ้าระวังพิเศษ · "}${x.p.name}`,prov:x.p.name,lat:x.p.lat,lon:x.p.lon,
+        badge:`<span class="lv" style="background:${LVC[x.lv]}">${LV[x.lv]} · ${DAYN[S.day]}</span>`,
+        lines:`ฝนสะสมทั้งวัน <b>${Math.round(x.mm)} มม.</b> โอกาสฝน ${x.pr}%${x.rr&&x.rr>=1.2?`<br>น้ำในลำน้ำสูงขึ้น <b>${x.rr.toFixed(1)} เท่า</b> ของสัปดาห์ก่อน`:""}<br>คนขี่: ขี่ช้า เปิดไฟหน้า เลี่ยงทางลอด สะพานต่ำ และถนนเลียบลำน้ำ`});
+    });
+  }
   if(S.routeLayer)S.routeLayer.eachLayer(l=>l.bringToFront&&l.bringToFront());
   $("#legend").innerHTML=`<span>🌧️ ฝนหนัก</span><span>⛈️ หนักมาก/พายุ</span>`+(rp?`<span>วงจาง = นอกเส้นทาง</span>`:"")+(S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]}"></i>${l}</span>`).join(""):`<span>ตัวเลข = ฝน มม./วัน</span>`+MMS.map(x=>`<span><i class="dot" style="background:${x[1]};border-radius:3px"></i>${x[2]}</span>`).join(""));
+}
+function renderHot(){
+  const el=$("#hot");if(!el)return;const hs=hotspots(S.day,null,8);
+  if(!hs){el.innerHTML=`<p class="hint">กำลังวิเคราะห์ฝนละเอียดระดับอำเภอ…</p>`;return}
+  if(!hs.length){el.innerHTML=`<div class="alert ok" style="margin-bottom:10px"><b>${DAYN[S.day]}ไม่มีจุดฝนหนักระดับอำเภอ</b></div>`;return}
+  el.innerHTML=`<div class="card" style="margin:0 0 12px"><h3 style="font-size:1rem">⚠️ จุดวิกฤตรายอำเภอ · ${DAYN[S.day]}</h3>
+    <div class="meta">ฝนหนักตั้งแต่ 35 มม./วัน เรียงจากหนักสุด แตะเพื่อดูบนแผนที่</div>
+    ${hs.map((g,i)=>`<button class="row" data-h="${i}"><i class="dot" style="background:${LVC[rainLv(g.d)]}"></i><span class="n"><span class="hn">${i===0?"⚠️ ":""}กำลังระบุอำเภอ…</span><small>ฝน ${Math.round(g.d)} มม. · โอกาส ${g.p}%${g.c>=95?" · ⛈️ พายุ":""}</small></span><span class="pill lv${rainLv(g.d)}">${LV[rainLv(g.d)]}</span></button>`).join("")}</div>`;
+  el.querySelectorAll(".row").forEach(b=>{const g=hs[+b.dataset.h];
+    geoName(g.lat,g.lon).then(n=>{const h=b.querySelector(".hn");if(h)h.textContent=(b.dataset.h==="0"?"⚠️ ":"")+n.label});
+    b.onclick=()=>{map.setView([g.lat,g.lon],10);openSpot(g.lat,g.lon,null);setTab("spot")}});
 }
 function renderList(){
   const regs=["ทั้งหมด","เหนือ","กลาง","ตะวันตก","ตะวันออก","อีสาน","ใต้"];
@@ -680,6 +755,7 @@ async function openSpot(lat,lon,name){
       <div class="spotbtns"><button class="btn" id="asFrom">ตั้งเป็นต้นทาง</button><button class="btn" id="asStop">แวะที่นี่</button><button class="btn primary" id="asTo">ไปที่นี่</button></div>
     </div>`;
     const here={name:title,lat,lon};
+    if(!name)geoName(lat,lon).then(g=>{const h=$("#spot h3");if(h&&h.textContent===title){h.textContent=g.label;here.name=g.label}});
     $("#asStop").onclick=()=>{if(S.stops.length>=5){alert("เพิ่มจุดแวะได้สูงสุด 5 จุด");return}S.stops.push({place:here,wait:30});renderStops();setTab("trip")};
     $("#asFrom").onclick=()=>{setEnd("from",here);setTab("trip")};
     $("#asTo").onclick=()=>{setEnd("to",here);setTab("trip");planTrip()};
@@ -702,7 +778,8 @@ $("#radarBtn").onclick=async()=>{
   }catch(e){alert("โหลดเรดาร์ไม่สำเร็จ ลองใหม่ภายหลัง")}
 };
 addEventListener("resize",()=>map.invalidateSize());
-map.on("zoomend",()=>{if(S.daily&&S.mode==="risk")renderMap()});
+map.on("zoomend",()=>{if(S.daily)renderMap()});
+map.on("moveend",()=>{if(S.daily&&S.grid&&map.getZoom()>=8)renderMap()});
 function setFull(on){
   document.body.classList.toggle("mapfull",on);
   const b=$("#fullBtn");b.setAttribute("aria-pressed",on);b.textContent=on?"✕ ย่อแผนที่":"⛶ เต็มจอ";b.title=on?"กลับไปขนาดเดิม":"ขยายแผนที่เต็มจอ";
