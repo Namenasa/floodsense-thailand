@@ -145,6 +145,23 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .rainic.big span{font-size:21px;transform:translate(0,-24px)}
 .rainic.rt span{transform:translate(-50%,-50%);font-size:19px}
 .rainic.rt.big span{font-size:23px}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#1F1915;color:#F3EDE7;box-shadow:0 6px 24px rgba(0,0,0,.5)}
+.leaflet-popup-content-wrapper{border-radius:14px;border:1px solid #3B312A}
+.leaflet-popup-content{margin:12px 14px;font-family:var(--body);font-size:13.5px;line-height:1.5}
+.leaflet-container a.leaflet-popup-close-button{color:#bbb;font-size:20px;padding:6px 8px 0 0}
+.ap h4{margin:0 22px 4px 0;font:700 15px/1.3 var(--head);color:#FF6B6B}
+.ap .lv{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;color:#fff;margin-bottom:6px}
+.ap .sec{border-top:1px solid #3B312A;margin-top:8px;padding-top:8px}
+.ap .sec>b{display:block;font-size:12px;color:#F08A5A;margin-bottom:3px}
+.ap .muted{color:#A99D92;font-size:12px}
+.ap ul{list-style:none;margin:0;padding:0}
+.ap li{padding:4px 0;border-bottom:1px dashed #3B312A}
+.ap li:last-child{border:0}
+.ap li a{color:#F3EDE7;text-decoration:none;font-weight:500}
+.ap li small{display:block;color:#A99D92;font-size:11px}
+.ap .links{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ap .links a{font-size:12px;color:#F08A5A;border:1px solid #4a3d34;border-radius:999px;padding:2px 9px;text-decoration:none}
+.ap .go{margin-top:10px;width:100%;background:#D2511C;border:0;color:#fff;border-radius:9px;padding:7px;font-weight:600;cursor:pointer}
 .warnic{position:relative}
 .warnic .pulse{position:absolute;left:-12px;top:-12px;width:24px;height:24px;border-radius:50%;border:3px solid #FF3B3B;box-shadow:0 0 12px #FF3B3B}
 .warnic span{position:absolute;left:0;bottom:8px;transform:translateX(-50%);background:#C4161F;color:#fff;border:1.5px solid #fff;border-radius:8px;padding:2px 8px;font:600 11.5px/1.4 var(--head);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
@@ -333,6 +350,56 @@ function renderSummary(){
 }
 const MMS=[[1,"#56626B","ไม่มีฝน"],[10,"#3A7BC8","ฝนเล็กน้อย"],[35,"#1F4FB0","ฝนปานกลาง"],[90,"#7A3BC2","ฝนหนัก"],[1e9,"#C21F6E","หนักมาก"]];
 const mmColor=mm=>MMS.find(x=>mm<x[0])[1];
+/* ---------- alert popup (โหลดข้อมูลเฉพาะตอนแตะ) ---------- */
+const newsCache={};
+function alertPopup(mk,o){
+  let built=null;
+  mk.bindPopup(()=>{
+    if(built)return built;
+    const d=document.createElement("div");d.className="ap";built=d;
+    const q=o.prov;
+    d.innerHTML=`<h4>⚠️ ${escH(o.title)}</h4>${o.badge||""}<div>${o.lines}</div>
+      <div class="sec"><b>ช่วงเวลาที่ฝนหนัก</b><div class="hr muted">กำลังโหลดพยากรณ์รายชั่วโมง…</div></div>
+      <div class="sec"><b>ข่าวล่าสุดแถว${escH(q)} (3 วัน)</b><div class="nw muted">กำลังค้นข่าว…</div>
+        <div class="links"><a href="https://news.google.com/search?q=${encodeURIComponent("น้ำท่วม "+q)}&hl=th&gl=TH&ceid=TH:th" target="_blank" rel="noopener">ค้นข่าว Google</a>
+        <a href="https://www.tmd.go.th" target="_blank" rel="noopener">ประกาศกรมอุตุฯ</a>
+        <a href="https://www.thaiwater.net" target="_blank" rel="noopener">ThaiWater</a>
+        <a href="tel:1784">โทร ปภ. 1784</a></div></div>
+      <button class="go">ดูพยากรณ์ละเอียดของจุดนี้</button>`;
+    d.querySelector(".go").onclick=()=>{map.closePopup();if(document.body.classList.contains("mapfull"))setFull(false);openSpot(o.lat,o.lon,o.title);setTab("spot")};
+    const upd=()=>{const pp=mk.getPopup();if(pp&&pp.isOpen())pp.update()};
+    Promise.all([loadHourly(d.querySelector(".hr"),o.lat,o.lon),loadNews(d.querySelector(".nw"),q)]).then(upd);setTimeout(upd,50);
+    return d;
+  },{maxWidth:300,minWidth:250,autoPanPaddingTopLeft:[20,150],autoPanPaddingBottomRight:[20,60]});
+}
+async function loadHourly(el,lat,lon){
+  try{
+    const j=await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&hourly=precipitation,precipitation_probability,weather_code&forecast_days=2&timezone=Asia%2FBangkok`);
+    const st=Math.max(0,j.hourly.time.indexOf(bkKey(new Date())));
+    const today=j.hourly.time[st].slice(0,10);
+    const hs=j.hourly.time.slice(st,st+24).map((t,k)=>({t:t.slice(11,16)+(t.slice(0,10)!==today?" (พรุ่งนี้)":""),mm:j.hourly.precipitation[st+k]||0,pr:j.hourly.precipitation_probability[st+k]||0,c:j.hourly.weather_code[st+k]}));
+    let pi=0;hs.forEach((h,k)=>{if(h.mm>hs[pi].mm)pi=k});const pk=hs[pi];
+    let a0=pi,a1=pi;if(pk.mm>=1){while(a0>0&&hs[a0-1].mm>=1)a0--;while(a1<hs.length-1&&hs[a1+1].mm>=1)a1++}
+    const wet=pk.mm>=1?hs.slice(a0,a1+1):[];
+    const storm=hs.some(h=>h.c>=95);
+    el.classList.remove("muted");
+    el.innerHTML=wet.length?`ฝนตกช่วง <b>${wet[0].t}${wet.length>1?"–"+wet[wet.length-1].t:""} น.</b><br>หนักสุดราว <b>${pk.t} น.</b> ${pk.mm.toFixed(1)} มม./ชม. (โอกาส ${pk.pr}%)${storm?"<br>⛈️ มีโอกาสเกิดพายุฝนฟ้าคะนอง":""}`
+      :`24 ชม. ข้างหน้าฝนเบาลง ไม่เกิน ${pk.mm.toFixed(1)} มม./ชม.`;
+  }catch(e){el.textContent="โหลดพยากรณ์รายชั่วโมงไม่สำเร็จ"}
+}
+async function loadNews(el,q){
+  const show=a=>{el.classList.toggle("muted",!a.length);
+    el.innerHTML=a.length?`<ul>${a.map(x=>`<li><a href="${escH(x.url)}" target="_blank" rel="noopener">${escH(x.title)}</a><small>${escH(x.src)} · ${escH(x.when)}</small></li>`).join("")}</ul>`
+      :"ยังไม่พบข่าวน้ำท่วมหรือฝนหนักของพื้นที่นี้ใน 3 วันล่าสุด ลองกดค้นข่าว Google ด้านล่าง"};
+  if(newsCache[q])return show(newsCache[q]);
+  try{
+    const query=`(น้ำท่วม OR ฝนตกหนัก OR น้ำป่า OR ดินสไลด์) ${q}`;
+    const j=await getJSON(`https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=5&format=json&timespan=3d&sort=datedesc`);
+    const a=(j.articles||[]).map(x=>{const t=x.seendate||"";const d=t?new Date(Date.UTC(+t.slice(0,4),+t.slice(4,6)-1,+t.slice(6,8),+t.slice(9,11),+t.slice(11,13))):null;
+      return{url:x.url,title:x.title,src:x.domain,when:d?d.toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"}):""}}).slice(0,4);
+    newsCache[q]=a;show(a);
+  }catch(e){el.classList.add("muted");el.textContent="ดึงข่าวอัตโนมัติไม่ได้ตอนนี้ กดค้นข่าว Google ด้านล่างเพื่อดูข่าวล่าสุด"}
+}
 function renderMap(){
   if(S.layer)S.layer.remove();S.layer=L.layerGroup().addTo(map);
   const rp=S.routeData?S.routeData.rt.coords.filter((c,i,a)=>i%Math.max(1,Math.floor(a.length/300))===0):null;
@@ -355,9 +422,13 @@ function renderMap(){
   });
   const crit=PROV.map(p=>({p,...stat(p,S.day)})).filter(x=>x.lv>=2&&(!rp||rp.some(c=>hav(x.p.lat,x.p.lon,c[0],c[1])<40)))
     .sort((a,b)=>b.lv-a.lv||b.mm-a.mm).slice(0,3);
-  crit.forEach((x,i)=>L.marker([x.p.lat,x.p.lon],{zIndexOffset:3000-i*200,title:`${x.p.name} ${Math.round(x.mm)} มม.`,icon:L.divIcon({className:"warnic",iconSize:null,
-      html:i===0?`<i class="pulse"></i><span>⚠️ วิกฤตสุด · ${x.p.name} ${Math.round(x.mm)} มม.</span>`:`<span class="sm">⚠️</span>`})})
-    .on("click",()=>{openSpot(x.p.lat,x.p.lon,x.p.name);setTab("spot")}).addTo(S.layer));
+  crit.forEach((x,i)=>{
+    const mk=L.marker([x.p.lat,x.p.lon],{zIndexOffset:3000-i*200,title:`${x.p.name} ${Math.round(x.mm)} มม.`,icon:L.divIcon({className:"warnic",iconSize:null,
+      html:i===0?`<i class="pulse"></i><span>⚠️ วิกฤตสุด · ${x.p.name} ${Math.round(x.mm)} มม.</span>`:`<span class="sm">⚠️</span>`})}).addTo(S.layer);
+    alertPopup(mk,{title:`${i===0?"วิกฤตสุด · ":"เฝ้าระวังพิเศษ · "}${x.p.name}`,prov:x.p.name,lat:x.p.lat,lon:x.p.lon,
+      badge:`<span class="lv" style="background:${LVC[x.lv]}">${LV[x.lv]} · ${DAYN[S.day]}</span>`,
+      lines:`ฝนสะสมทั้งวัน <b>${Math.round(x.mm)} มม.</b> โอกาสฝน ${x.pr}%${x.rr&&x.rr>=1.2?`<br>น้ำในลำน้ำสูงขึ้น <b>${x.rr.toFixed(1)} เท่า</b> ของสัปดาห์ก่อน`:""}<br>คนขี่: ขี่ช้า เปิดไฟหน้า เลี่ยงทางลอด สะพานต่ำ และถนนเลียบลำน้ำ`});
+  });
   if(S.routeLayer)S.routeLayer.eachLayer(l=>l.bringToFront&&l.bringToFront());
   $("#legend").innerHTML=`<span>🌧️ ฝนหนัก</span><span>⛈️ หนักมาก/พายุ</span>`+(rp?`<span>วงจาง = นอกเส้นทาง</span>`:"")+(S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]}"></i>${l}</span>`).join(""):`<span>ตัวเลข = ฝน มม./วัน</span>`+MMS.map(x=>`<span><i class="dot" style="background:${x[1]};border-radius:3px"></i>${x[2]}</span>`).join(""));
 }
@@ -574,8 +645,12 @@ function drawTrip(){
   for(let i=0;i<res.length-1;i++){const r=res[i];const seg=S.routeData.rt.coords.slice(r.idx,res[i+1].idx+2);
     const col=r.nodata?"#888":r.mm>=5?"#D9313A":r.mm>=1?"#E06B24":wet(r)?"#D9A21B":"#3E9B6B";
     L.polyline(seg.length>1?seg:[[r.lat,r.lon],[res[i+1].lat,res[i+1].lon]],{color:col,weight:5}).addTo(S.routeLayer);}
-  if(hasWorst)L.marker([worst.lat,worst.lon],{zIndexOffset:4000,icon:L.divIcon({className:"warnic route",iconSize:null,
+  if(hasWorst){const wp=nearest(worst.lat,worst.lon).p.name;
+    const wm=L.marker([worst.lat,worst.lon],{zIndexOffset:4000,icon:L.divIcon({className:"warnic route",iconSize:null,
     html:`<i class="pulse"></i><span>⚠️ หนักสุดบนเส้นทาง ${hhmm(worst.eta)} น. · ${worst.mm.toFixed(1)} มม./ชม.</span>`})}).addTo(S.routeLayer);
+    alertPopup(wm,{title:`หนักสุดบนเส้นทาง · ${worst.place}`,prov:wp,lat:worst.lat,lon:worst.lon,
+      badge:`<span class="lv" style="background:#7A0E14">ขี่ผ่านราว ${hhmm(worst.eta)} น.</span>`,
+      lines:`กม. ${worst.km} จากต้นทาง ฝน <b>${worst.mm.toFixed(1)} มม./ชม.</b> โอกาส ${worst.pr}%<br>ถ้าเป็นไปได้ แวะพักรอฝนซาก่อนถึงจุดนี้ หรือลองเลื่อนเวลาออก`});}
   res.filter(r=>r.stop).forEach((r,k)=>L.marker([r.lat,r.lon],{zIndexOffset:1000,icon:L.divIcon({className:"stopic",iconSize:null,html:`<span>${k+1}</span>`})}).bindTooltip(`แวะ ${escH(r.place)} ${hhmm(r.eta)} น.`).addTo(S.routeLayer));
   res.filter(r=>!r.nodata&&(r.mm>=2.5||r.c>=95)&&!(hasWorst&&r===worst)).forEach(r=>L.marker([r.lat,r.lon],{zIndexOffset:2500,
     icon:L.divIcon({className:"rainic rt"+(r.mm>=7.6||r.c>=95?" big":""),iconSize:null,html:`<span>${r.mm>=7.6||r.c>=95?"⛈️":"🌧️"}</span>`})})
