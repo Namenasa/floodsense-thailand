@@ -171,13 +171,6 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 @media (prefers-reduced-motion:no-preference){.warnic .pulse{animation:pulse 1.6s ease-out infinite}}
 @keyframes pulse{0%{transform:scale(.6);opacity:1}100%{transform:scale(1.5);opacity:0}}
 .tl li.worst{background:rgba(217,49,58,.14);border-radius:10px;margin:2px -6px;padding:7px 6px;outline:1.5px solid rgba(217,49,58,.6)}
-.chk{flex-direction:row!important;align-items:center;gap:8px!important;font-size:.92rem!important;color:var(--fg)!important;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:9px 10px;cursor:pointer}
-.chk input{width:20px;height:20px;accent-color:var(--brand);margin:0}
-.fuelic span{position:absolute;transform:translate(-50%,-50%);font-size:15px;line-height:1;background:#fff;border-radius:6px;padding:2px 2px;box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:pointer}
-.fl{list-style:none;margin:6px 0 0;padding:0;font-size:.88rem}
-.fl li{display:grid;grid-template-columns:52px 1fr auto;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)}
-.fl li .t{font-family:var(--head);font-weight:600}
-.fl li small{color:var(--muted)}
 .stoprow{display:grid;grid-template-columns:1fr 100px 40px;gap:6px;align-items:end;margin-bottom:8px}
 .stoprow select{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 4px;font-size:.85rem}
 .stoprow .btn{padding:8px 0}
@@ -252,7 +245,6 @@ body.mapfull{overflow:hidden}
           <label>วันเดินทาง<input type="date" id="tday"></label>
           <label>เวลาออก<input type="time" id="ttime" value="07:00" step="900"></label>
           <div class="full dinfo"><div class="dchips" id="dchips"></div><div class="dnote" id="dnote"></div></div>
-          <label class="full chk"><input type="checkbox" id="fuelChk"> ⛽ แสดงปั๊มน้ำมันระหว่างทาง</label>
           <label class="full">ความเร็วเฉลี่ย (รวมพัก)
             <select id="speed">
               <option value="1">ตามเวลาขับปกติ</option>
@@ -622,50 +614,7 @@ attachAC($("#from"),x=>{S.from=x.me?{name:"ตำแหน่งของฉั�
 attachAC($("#to"),x=>{S.to=x},{onBlur:()=>{if(S.to)$("#to").value=S.to.name}});
 let searchMk=null;
 const HOME=[13.2,101],HOMEZ=6;
-/* ---------- ปั๊มน้ำมันระหว่างทาง (OpenStreetMap / Overpass) ---------- */
-let fuelOn=false;try{fuelOn=localStorage.getItem("fs-fuel")==="1"}catch(e){}
-$("#fuelChk").checked=fuelOn;
-$("#fuelChk").onchange=()=>{fuelOn=$("#fuelChk").checked;try{localStorage.setItem("fs-fuel",fuelOn?"1":"0")}catch(e){}
-  if(S.routeData)drawFuel();else if(!fuelOn&&S.fuelLayer){S.fuelLayer.remove();S.fuelLayer=null}};
-function routeCum(rt){const c=rt.coords,cum=[0];for(let i=1;i<c.length;i++)cum.push(cum[i-1]+hav(c[i-1][0],c[i-1][1],c[i][0],c[i][1]));const k=rt.km/(cum[cum.length-1]||1);return cum.map(v=>v*k)}
-async function loadFuel(rd){
-  if(rd.fuel)return rd.fuel;
-  const rt=rd.rt,cum=routeCum(rt);const pts=[];let last=-99;
-  rt.coords.forEach((c,i)=>{if(cum[i]-last>=2.5||i===rt.coords.length-1){pts.push(c);last=cum[i]}});
-  const line=pts.slice(0,600).map(c=>c[0].toFixed(4)+","+c[1].toFixed(4)).join(",");
-  const q=`[out:json][timeout:40];(node["amenity"="fuel"](around:700,${line});way["amenity"="fuel"](around:700,${line}););out center tags;`;
-  let j=null;
-  for(const u of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
-    try{const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)});if(r.ok){j=await r.json();break}}catch(e){}
-  }
-  if(!j)throw new Error("overpass");
-  const seen=[];const out=[];
-  j.elements.forEach(e=>{const lat=e.lat??(e.center&&e.center.lat),lon=e.lon??(e.center&&e.center.lon);if(lat==null)return;
-    if(seen.some(x=>hav(x[0],x[1],lat,lon)<0.08))return;seen.push([lat,lon]);
-    const t=e.tags||{};let bi=0,bd=1e9;for(let i=0;i<rt.coords.length;i+=1){const d=hav(lat,lon,rt.coords[i][0],rt.coords[i][1]);if(d<bd){bd=d;bi=i}}
-    out.push({lat,lon,km:cum[bi],off:bd,name:t["name:th"]||t.name||t.brand||"ปั๊มน้ำมัน",brand:t.brand||t.operator||"",h24:t.opening_hours==="24/7"})});
-  const ok=out.filter(f=>f.off<=1.5||rt.approx);ok.sort((a,b)=>a.km-b.km);rd.fuel=ok;return ok;
-}
-async function drawFuel(){
-  const box=$("#fuelBox");if(S.fuelLayer){S.fuelLayer.remove();S.fuelLayer=null}
-  if(!box)return;if(!fuelOn||!S.routeData){box.innerHTML="";return}
-  const rd=S.routeData;box.innerHTML=`<div class="alert ok">⛽ กำลังค้นหาปั๊มน้ำมันตามเส้นทาง…</div>`;
-  let F;try{F=await loadFuel(rd)}catch(e){if(S.routeData===rd)box.innerHTML=`<div class="alert">ค้นหาปั๊มน้ำมันไม่สำเร็จ ลองกดติ๊กใหม่อีกครั้ง</div>`;return}
-  if(S.routeData!==rd||!fuelOn)return;
-  const dep=new Date(`${$("#tday").value}T${$("#ttime").value||"07:00"}:00+07:00`);
-  const eta=km=>new Date(dep.getTime()+rd.rt.tAt(km)*1000);
-  const marks=[0,...F.map(f=>f.km),rd.rt.km];let gap={d:0,a:0,b:0};
-  for(let i=1;i<marks.length;i++){const d=marks[i]-marks[i-1];if(d>gap.d)gap={d,a:marks[i-1],b:marks[i]}}
-  S.fuelLayer=L.layerGroup().addTo(map);
-  F.forEach(f=>L.marker([f.lat,f.lon],{zIndexOffset:900,icon:L.divIcon({className:"fuelic",iconSize:null,html:"<span>⛽</span>"})})
-    .bindTooltip(`${escH(f.name)}<br>กม. ${Math.round(f.km)} · ถึงราว ${hhmm(eta(f.km))} น.${f.h24?" · 24 ชม.":""}`).addTo(S.fuelLayer));
-  const warn=gap.d>=60?`<br><b>⚠️ ช่วงที่ไม่มีปั๊มนานสุด ${Math.round(gap.d)} กม.</b> (กม. ${Math.round(gap.a)}–${Math.round(gap.b)}) เติมให้เต็มก่อนถึง กม. ${Math.round(gap.a)}`:"";
-  const show=F.slice(0,20);
-  box.innerHTML=`<div class="alert ${gap.d>=60?"":"ok"}"><b>⛽ ปั๊มน้ำมันระหว่างทาง ${F.length} แห่ง</b> (ห่างจากเส้นทางไม่เกิน 700 ม.)${warn}
-    ${F.length?`<ul class="fl">${show.map(f=>`<li><span class="t">${hhmm(eta(f.km))}</span><span>${escH(f.name)}${f.h24?" · 24 ชม.":""}<br><small>กม. ${Math.round(f.km)}${f.off>0.2?` · ห่างเส้นทาง ${Math.round(f.off*1000)} ม.`:""}</small></span><small>${escH(f.brand)}</small></li>`).join("")}</ul>${F.length>20?`<small>และอีก ${F.length-20} แห่ง ดูได้บนแผนที่</small>`:""}`:"<br>ไม่พบปั๊มน้ำมันในฐานข้อมูลตามเส้นทางนี้"}</div>`;
-}
 function resetView(){
-  if(S.fuelLayer){S.fuelLayer.remove();S.fuelLayer=null}
   map.eachLayer(l=>{if(l.closePopup)l.closePopup()});map.closePopup();
   S.routeData=null;if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;
   if(searchMk){searchMk.remove();searchMk=null}if(S.spotMk){S.spotMk.remove();S.spotMk=null}
@@ -837,7 +786,6 @@ function drawTrip(){
     <div class="meta">${Math.round(rt.km)} กม. ออก ${hhmm(dep)} น. ถึงประมาณ ${hhmm(arrive)} น. (${Math.floor(rt.total/3600)} ชม. ${Math.round(rt.total%3600/60)} นาที${rt.nStops?` รวมแวะ ${rt.nStops} จุด พัก ${rt.wait} นาที`:""})${rt.approx?" · ระยะทางโดยประมาณ":""}</div>
     ${sumHtml}${roadHtml}${bestHtml}${chart}
     ${miss===res.length?`<div class="alert">ยังไม่มีพยากรณ์ฝนของวันที่เลือก (ดูได้ล่วงหน้า ${FC_DAYS} วัน) เวลาผ่านแต่ละจุดคำนวณให้แล้ว กลับมากดตรวจอีกครั้งเมื่อใกล้วันเดินทาง</div>`:miss?`<p class="hint">บางช่วงเกินระยะพยากรณ์ที่มี จะแสดงเป็น "ไม่มีข้อมูล"</p>`:""}
-    <div id="fuelBox"></div>
     <ul class="tl">${res.map(r=>`<li class="${hasWorst&&r===worst?"worst":r.stop?"stop":""}"><span class="t">${hhmm(r.eta)}</span><i class="bul" style="background:${r.nodata?"#777":r.mm>=5?"#D9313A":r.mm>=1?"#E06B24":wet(r)?"#D9A21B":"#3E9B6B"}"></i>
       <span class="pl">${hasWorst&&r===worst?"⚠️ ":""}${r.stop?"☕ แวะ "+escH(r.place):escH(r.place)}<small>กม. ${r.km}${r.stop?` · ${r.stop.wait?`พัก ${r.stop.wait} นาที ออก ${hhmm(new Date(r.eta.getTime()+r.stop.wait*60e3))} น.`:"ผ่านเฉยๆ"}`:r.frac===0?" · ออกเดินทาง":r.frac===1?" · ถึงปลายทาง":""}${r.road?`<br>${r.road.flood?"🌊 เสี่ยงน้ำขัง":r.road.vis?"🌫️ ทัศนวิสัยต่ำ":r.road.slick?"💧 ถนนเปียก ลื่น":"🟢 ถนนแห้ง"}`:""}</small></span>
       <span class="mm">${r.nodata?"ไม่มีข้อมูล":`${wIcon(r.c,r.mm)} <b>${r.mm.toFixed(1)}</b> มม./ชม.<br><small>โอกาส ${r.pr}%</small>`}</span></li>`).join("")}</ul>
@@ -863,7 +811,6 @@ function drawTrip(){
     .bindTooltip(`${hhmm(r.eta)} น. ${escH(r.place)} ฝนหนัก ${r.mm.toFixed(1)} มม./ชม.`).addTo(S.routeLayer));
   res.filter(r=>wet(r)&&!(r.mm>=2.5||r.c>=95)).forEach(r=>L.circleMarker([r.lat,r.lon],{radius:6,color:"#fff",weight:2,fillColor:"#D9313A",fillOpacity:1}).bindTooltip(`${hhmm(r.eta)} น. ${r.place} ฝน ${r.mm.toFixed(1)} มม./ชม.`).addTo(S.routeLayer));
   map.fitBounds(L.latLngBounds(S.routeData.rt.coords),{paddingTopLeft:[30,140],paddingBottomRight:[30,70]});
-  drawFuel();
 }
 $("#go").onclick=planTrip;
 ["#ttime","#speed"].forEach(s=>$(s).onchange=()=>{if(S.routeData){if(s==="#speed")planTrip();else drawTrip()}});
