@@ -558,19 +558,32 @@ function fillSelects(){
   fillDays();
 }
 /* ---------- place search (Photon / OpenStreetMap) ---------- */
+const isThai=t=>/[\u0E00-\u0E7F]/.test(t);
+async function nomSearch(q){
+  const j=await getJSON(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=th&accept-language=th&addressdetails=1&q=${encodeURIComponent(q)}`);
+  return j.map(x=>{const a=x.address||{};const nm=x.name||x.display_name.split(", ")[0];
+    const amp=a.county||a.city_district||a.district||a.town||"";const prov=shortProv(a.state||a.city||"");
+    const sub=[a.road,a.suburb||a.village||a.hamlet,amp&&amp!==nm?shortAmp(amp):"",prov&&prov!==nm?"จ."+prov:""].filter(Boolean).join(", ");
+    return{name:nm,sub,lat:+x.lat,lon:+x.lon}});
+}
+async function photonSearch(q){
+  const j=await getJSON(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lat=13.75&lon=100.5&bbox=97.3,5.5,105.7,20.5`);
+  return j.features.map(f=>{const pr=f.properties;const sub=[pr.street,pr.district,pr.city||pr.county,pr.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i&&v!==pr.name).join(", ");
+    return{name:pr.name||[pr.street,pr.housenumber].filter(Boolean).join(" ")||sub,sub,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}}).filter(x=>x.name);
+}
 async function searchPlaces(q){
-  const qq=q.trim().toLowerCase();
+  const qq=q.trim().toLowerCase(),th=isThai(q);
   const local=PROV.filter(p=>p.name.toLowerCase().includes(qq)).slice(0,4).map(p=>({name:p.name,sub:"จังหวัด (ตัวเมือง)",lat:p.lat,lon:p.lon}));
-  let remote=[];
-  try{
-    const j=await getJSON(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lat=13.75&lon=100.5&bbox=97.3,5.5,105.7,20.5`);
-    remote=j.features.map(f=>{const pr=f.properties;const sub=[pr.street,pr.district,pr.city||pr.county,pr.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i&&v!==pr.name).join(", ");
-      return{name:pr.name||[pr.street,pr.housenumber].filter(Boolean).join(" ")||sub,sub,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}}).filter(x=>x.name);
-  }catch(e){
-    try{const j=await getJSON(`https://nominatim.openstreetmap.org/search?format=json&limit=6&countrycodes=th&accept-language=th&q=${encodeURIComponent(q)}`);
-      remote=j.map(x=>{const parts=x.display_name.split(", ");return{name:parts[0],sub:parts.slice(1,4).join(", "),lat:+x.lat,lon:+x.lon}})}catch(e2){}
+  const [n,ph]=await Promise.allSettled([nomSearch(q),photonSearch(q)]);
+  let A=n.status==="fulfilled"?n.value:[],B=ph.status==="fulfilled"?ph.value:[];
+  // ภาษาไทยไม่มีเว้นวรรค ถ้ายังไม่เจอ ลองตัดคำนำหน้าที่พบบ่อยแล้วค้นใหม่
+  if(th&&!A.length&&!B.length){
+    const q2=q.replace(/^(ร้าน|ปั๊ม|วัด|โรงเรียน|โรงพยาบาล|ตลาด|อำเภอ|อ\.|จังหวัด|จ\.)\s*/,"").trim();
+    if(q2&&q2!==q){try{A=await nomSearch(q2)}catch(e){}}
   }
-  return local.concat(remote);
+  const remote=(th?A.concat(B):B.concat(A));
+  const out=[];for(const r of local.concat(remote)){if(!out.some(o=>hav(o.lat,o.lon,r.lat,r.lon)<0.3&&(o.name===r.name||hav(o.lat,o.lon,r.lat,r.lon)<0.05)))out.push(r)}
+  return out.slice(0,10);
 }
 function attachAC(input,onPick,opt={}){
   const list=input.parentElement.querySelector(".acl");let items=[],hl=-1,timer=null,seq=0;
@@ -587,7 +600,7 @@ function attachAC(input,onPick,opt={}){
     if(q.length<2){show(base());return}
     show(base(),"กำลังค้นหา…");
     timer=setTimeout(async()=>{const my=++seq;const r=await searchPlaces(q);if(my!==seq)return;
-      show(base().concat(r),r.length?"":"ไม่พบสถานที่ ลองพิมพ์ชื่ออื่น หรือใส่ชื่ออำเภอ/จังหวัดต่อท้าย")},380);
+      show(base().concat(r),r.length?"":"ไม่พบสถานที่ ลองพิมพ์ชื่ออื่น หรือใส่ชื่ออำเภอ/จังหวัดต่อท้าย")},isThai(q)?600:380);
   });
   input.addEventListener("keydown",e=>{
     const lis=list.querySelectorAll("li[data-i]");
