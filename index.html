@@ -350,14 +350,17 @@ function setSat(on){
 map.attributionControl.addAttribution("พยากรณ์ Open-Meteo, GloFAS | เส้นทาง OSRM | ค้นหา Photon/OSM");
 
 /* ---------- data ---------- */
-async function loadAll(){
+/* แคชข้อมูลในเครื่อง ลดการเรียก API ซ้ำ (Open-Meteo จำกัด 600 ครั้ง/นาที) */
+const cGet=(k,maxMs)=>{try{const o=JSON.parse(localStorage.getItem("fs-c-"+k));if(o&&Date.now()-o.t<maxMs)return o.v}catch(e){}return null};
+const cSet=(k,v)=>{try{localStorage.setItem("fs-c-"+k,JSON.stringify({t:Date.now(),v}))}catch(e){}};
+async function getJSONRetry(u,tries=3){let e;for(let i=0;i<tries;i++){try{return await getJSON(u)}catch(x){e=x;await new Promise(r=>setTimeout(r,1500*(i+1)))}}throw e}
+async function loadAll(force){
   const b=$("#refresh");b.disabled=true;$("#upd").textContent="กำลังโหลดพยากรณ์ 77 จังหวัด…";
   const lat=PROV.map(p=>p.lat).join(","),lon=PROV.map(p=>p.lon).join(",");
   try{
-    const [w,f]=await Promise.all([
-      getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=precipitation_sum,precipitation_probability_max,weather_code&forecast_days=3&timezone=Asia%2FBangkok`),
-      getJSON(`https://flood-api.open-meteo.com/v1/flood?latitude=${lat}&longitude=${lon}&daily=river_discharge&past_days=7&forecast_days=3`).catch(()=>null)
-    ]);
+    let w=force?null:cGet("prov",25*60e3),f=force?null:cGet("flood",60*60e3);
+    if(!w){w=await getJSONRetry(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=precipitation_sum,precipitation_probability_max,weather_code&forecast_days=3&timezone=Asia%2FBangkok`);cSet("prov",(Array.isArray(w)?w:[w]).map(x=>({daily:x.daily})))}
+    if(!f){f=await getJSON(`https://flood-api.open-meteo.com/v1/flood?latitude=${lat}&longitude=${lon}&daily=river_discharge&past_days=7&forecast_days=3`).catch(()=>null);if(f)cSet("flood",(Array.isArray(f)?f:[f]).map(x=>({daily:x.daily})))}
     S.daily=(Array.isArray(w)?w:[w]).map(x=>x.daily);
     S.river=f?(Array.isArray(f)?f:[f]).map(x=>{
       const q=(x.daily&&x.daily.river_discharge)||[];const past=q.slice(0,7).filter(v=>v!=null),fut=q.slice(7).filter(v=>v!=null);
@@ -367,13 +370,13 @@ async function loadAll(){
     renderAll();
     loadObs().then(()=>{softRender();renderSummary();renderList()});
     if(!S.grid||Date.now()-(S.gridAt||0)>55*60e3)loadGrid().then(()=>{softRender();renderHot()});else renderHot();
-  }catch(e){$("#upd").textContent="โหลดพยากรณ์ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วกดรีเฟรช";}
+  }catch(e){$("#upd").textContent=S.daily?"รีเฟรชไม่สำเร็จ แสดงข้อมูลล่าสุดที่มี ลองใหม่อีกครั้งในอีกสักครู่":"โหลดพยากรณ์ไม่สำเร็จ ระบบพยากรณ์อาจมีผู้ใช้มาก ลองกดรีเฟรชอีกครั้งในอีก 1 นาที";}
   b.disabled=false;
 }
 /* ---------- ระดับน้ำจริงจากสถานีวัด (สสน. ThaiWater) ---------- */
 async function loadObs(){
-  const urls=["https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load","/tw/waterlevel_load"];
-  let j=null;for(const u of urls){try{const r=await fetch(u);if(r.ok){j=await r.json();break}}catch(e){}}
+  const urls=["/api/tw","https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load","/tw/waterlevel_load"];
+  let j=null;for(const u of urls){try{const r=await fetch(u);if(r.ok){const x=await r.json();if(x&&x.waterlevel_data){j=x;break}}}catch(e){}}
   if(!j||!j.waterlevel_data){S.obs=null;S.obsErr=true;return}
   const now=Date.now(),out=[],byProv={};
   (j.waterlevel_data.data||[]).forEach(d=>{
@@ -424,16 +427,18 @@ function renderSummary(){
 const MMS=[[1,"#56626B","ไม่มีฝน"],[10,"#3A7BC8","ฝนเล็กน้อย"],[35,"#1F4FB0","ฝนปานกลาง"],[90,"#7A3BC2","ฝนหนัก"],[1e9,"#C21F6E","หนักมาก"]];
 const mmColor=mm=>MMS.find(x=>mm<x[0])[1];
 /* ---------- ตารางจุดพยากรณ์ละเอียด ~25 กม. (ระดับอำเภอ) ---------- */
-const GRID=(()=>{const g=[];for(let la=5.6;la<=20.5;la+=.25)for(let lo=97.3;lo<=105.7;lo+=.25){
+const GRID=(()=>{const g=[];for(let la=5.6;la<=20.5;la+=.33)for(let lo=97.3;lo<=105.7;lo+=.33){
   const d=nearest(la,lo).d;if(d<65)g.push({lat:+la.toFixed(3),lon:+lo.toFixed(3)})}return g})();
 async function loadGrid(){
+  const cached=cGet("grid",55*60e3);if(cached){S.grid=cached;S.gridAt=Date.now();return}
   const B=150,parts=[];for(let i=0;i<GRID.length;i+=B)parts.push(GRID.slice(i,i+B));
   const out=[];
-  for(let k=0;k<parts.length;k+=3){
-    const res=await Promise.all(parts.slice(k,k+3).map(pt=>getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pt.map(x=>x.lat).join(",")}&longitude=${pt.map(x=>x.lon).join(",")}&daily=precipitation_sum,precipitation_probability_max,weather_code&forecast_days=3&timezone=Asia%2FBangkok`).then(w=>{
+  for(let k=0;k<parts.length;k+=2){
+    if(k)await new Promise(r=>setTimeout(r,8000));
+    const res=await Promise.all(parts.slice(k,k+2).map(pt=>getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pt.map(x=>x.lat).join(",")}&longitude=${pt.map(x=>x.lon).join(",")}&daily=precipitation_sum,precipitation_probability_max,weather_code&forecast_days=3&timezone=Asia%2FBangkok`).then(w=>{
       (Array.isArray(w)?w:[w]).forEach((x,i)=>{if(x&&x.daily&&(x.elevation>0.5||nearest(pt[i].lat,pt[i].lon).d<15))out.push({lat:pt[i].lat,lon:pt[i].lon,mm:x.daily.precipitation_sum,pr:x.daily.precipitation_probability_max,code:x.daily.weather_code})})}).catch(()=>{})));
   }
-  S.grid=out;S.gridAt=Date.now();
+  S.grid=out;S.gridAt=Date.now();if(out.length)cSet("grid",out);
 }
 const geoCache={};let geoQ=Promise.resolve();
 const shortAmp=a=>a.replace(/^อำเภอ\s*/,"อ.").replace(/^เขต\s*/,"เขต").replace(/^Amphoe\s*/i,"อ.");
@@ -901,7 +906,7 @@ async function openSpot(lat,lon,name){
 map.on("click",e=>{openSpot(e.latlng.lat,e.latlng.lng,null);setTab("spot")});
 
 /* ---------- controls ---------- */
-$("#refresh").onclick=loadAll;
+$("#refresh").onclick=()=>loadAll(true);
 $("#modeBtn").onclick=()=>{S.mode=S.mode==="risk"?"rain":"risk";$("#modeBtn").setAttribute("aria-pressed",S.mode==="rain");$("#modeBtn").textContent=S.mode==="rain"?"แสดงความเสี่ยง":"แสดงปริมาณฝน";if(S.daily)renderMap()};
 $("#locBtn").onclick=()=>locate(ll=>{map.setView(ll,10);openSpot(ll[0],ll[1],null);setTab("spot")});
 $("#radarBtn").onclick=async()=>{
