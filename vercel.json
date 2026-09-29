@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/tw/:path*", "destination": "https://api-v3.thaiwater.net/api/v1/thaiwater30/public/:path*" }
+  ]
+}

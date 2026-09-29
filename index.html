@@ -162,6 +162,8 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .ap .links{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .ap .links a{font-size:12px;color:#F08A5A;border:1px solid #4a3d34;border-radius:999px;padding:2px 9px;text-decoration:none}
 .ap .go{margin-top:10px;width:100%;background:#D2511C;border:0;color:#fff;border-radius:9px;padding:7px;font-weight:600;cursor:pointer}
+.obsic span{position:absolute;transform:translate(-50%,-50%);font-size:11px;line-height:1;background:rgba(31,111,178,.85);border:1.5px solid #fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.5);cursor:pointer}
+.obsic.ov span{background:#0B4F8A;width:20px;height:20px;font-size:12px;box-shadow:0 0 0 2px rgba(76,155,232,.55),0 1px 3px rgba(0,0,0,.5)}
 .warnic{position:relative}
 .warnic .pulse{position:absolute;left:-12px;top:-12px;width:24px;height:24px;border-radius:50%;border:3px solid #FF3B3B;box-shadow:0 0 12px #FF3B3B}
 .warnic span{position:absolute;left:0;bottom:8px;transform:translateX(-50%);background:#C4161F;color:#fff;border:1.5px solid #fff;border-radius:8px;padding:2px 8px;font:600 11.5px/1.4 var(--head);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
@@ -240,6 +242,7 @@ body.mapfull{overflow:hidden}
         <div class="d" id="sumDate"></div>
         <h2 id="sumHead">กำลังวิเคราะห์…</h2>
         <p id="sumText"></p>
+        <p id="sumObs" style="margin-top:4px;font-size:.88rem"></p>
         <div class="days" id="days"></div>
       </section>
 
@@ -362,14 +365,41 @@ async function loadAll(){
       return m>1?Math.max(...fut)/m:null;}):PROV.map(()=>null);
     $("#upd").textContent="อัปเดต "+new Date().toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})+" น.";
     renderAll();
+    loadObs().then(()=>{softRender();renderSummary();renderList()});
     if(!S.grid||Date.now()-(S.gridAt||0)>55*60e3)loadGrid().then(()=>{softRender();renderHot()});else renderHot();
   }catch(e){$("#upd").textContent="โหลดพยากรณ์ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วกดรีเฟรช";}
   b.disabled=false;
 }
+/* ---------- ระดับน้ำจริงจากสถานีวัด (สสน. ThaiWater) ---------- */
+async function loadObs(){
+  const urls=["https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load","/tw/waterlevel_load"];
+  let j=null;for(const u of urls){try{const r=await fetch(u);if(r.ok){j=await r.json();break}}catch(e){}}
+  if(!j||!j.waterlevel_data){S.obs=null;S.obsErr=true;return}
+  const now=Date.now(),out=[],byProv={};
+  (j.waterlevel_data.data||[]).forEach(d=>{
+    const st=d.station||{},g=d.geocode||{};const lv=+d.situation_level;if(lv<4)return;
+    const t=Date.parse((d.waterlevel_datetime||"").replace(" ","T")+":00+07:00");if(!(now-t<48*3600e3))return;
+    const lat=+st.tele_station_lat,lon=+st.tele_station_long;if(!lat||!lon)return;
+    const prov=(g.province_name&&g.province_name.th)||"",amp=(g.amphoe_name&&g.amphoe_name.th)||"";
+    const diff=parseFloat(d.diff_wl_bank)||0,over=/ล้น/.test(d.diff_wl_bank_text||"");
+    const rising=parseFloat(d.waterlevel_msl)-parseFloat(d.waterlevel_msl_previous);
+    const o={lat,lon,lv,prov,amp,name:(st.tele_station_name&&(st.tele_station_name.th||st.tele_station_name.en))||"สถานีวัดน้ำ",river:d.river_name||"",
+      over,diff,pct:parseFloat(d.storage_percent)||0,rising:isFinite(rising)?rising:0,time:t};
+    out.push(o);(byProv[prov]=byProv[prov]||[]).push(o);
+  });
+  S.obs=out;S.obsProv=byProv;S.obsAt=now;S.obsErr=false;
+}
+function obsLv(name){
+  const a=S.obsProv&&S.obsProv[name];if(!a||!a.length)return 0;
+  const ov=a.filter(x=>x.over),big=ov.filter(x=>x.diff>=0.5);
+  if(big.length>=2||ov.length>=4)return 3;if(ov.length)return 2;return 1;
+}
 function stat(p,day){
   const d=S.daily[p.i];const mm=d.precipitation_sum[day]||0,pr=d.precipitation_probability_max[day]||0;
   let lv=rainLv(mm);const rr=S.river&&S.river[p.i];if(rr&&rr>=1.5&&mm>=10)lv=Math.min(3,lv+1);
-  return{mm,pr,lv,rr,code:d.weather_code[day]};
+  const ob=day<=1?obsLv(p.name):0;const obs=S.obsProv&&S.obsProv[p.name]||[];
+  lv=Math.max(lv,ob);
+  return{mm,pr,lv,rr,code:d.weather_code[day],ob,nOver:obs.filter(x=>x.over).length,nHigh:obs.length};
 }
 
 /* ---------- render ---------- */
@@ -387,6 +417,8 @@ function renderSummary(){
   const heavy=st.filter(x=>x.mm>=35);
   $("#sumDate").textContent=DAYN[S.day]+" "+fmtDate(iso);
   $("#sumHead").textContent=heavy.length?`${heavy.length} จังหวัดฝนตกหนัก`:"ไม่มีจังหวัดที่ฝนตกหนัก";
+  const ovN=S.obs?S.obs.filter(x=>x.over).length:0;
+  $("#sumObs").innerHTML=S.obs?`🌊 สถานีวัดน้ำ<b> ล้นตลิ่ง ${ovN} แห่ง</b> ทั่วประเทศ (ข้อมูลจริงจาก สสน.)`:S.obsErr?"ดึงข้อมูลระดับน้ำจริงจาก สสน. ไม่ได้ แสดงเฉพาะพยากรณ์":"กำลังโหลดระดับน้ำจริงจาก สสน.…";
   $("#sumText").textContent="มากสุด: "+st.slice(0,4).map(x=>`${x.p.name} ${Math.round(x.mm)} มม.`).join(", ");
 }
 const MMS=[[1,"#56626B","ไม่มีฝน"],[10,"#3A7BC8","ฝนเล็กน้อย"],[35,"#1F4FB0","ฝนปานกลาง"],[90,"#7A3BC2","ฝนหนัก"],[1e9,"#C21F6E","หนักมาก"]];
@@ -498,18 +530,23 @@ function renderMap(){
     const fillC=S.mode==="risk"?LVC[s.lv]:mmColor(s.mm);
     const sh=PSHAPE[p.name];
     if(sh){L.polygon(sh.map(r=>r.map(c=>[c[1],c[0]])),{color:fillC,weight:off?.4:1,opacity:off?.35:.9,fillColor:fillC,fillOpacity:off?.07:(S.mode==="risk"?[.18,.3,.4,.5][s.lv]:.28),smoothFactor:1.5})
-      .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`,{sticky:true})
+      .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.nOver?`<br>🌊 สถานีวัดน้ำล้นตลิ่ง ${s.nOver} แห่ง`:s.nHigh?`<br>💧 ระดับน้ำสูง ${s.nHigh} สถานี`:""}${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`,{sticky:true})
       .on("click",e=>{L.DomEvent.stopPropagation(e);openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer)}
     const mk=S.mode==="risk"&&sh?null:S.mode==="risk"
       ?L.circleMarker([p.lat,p.lon],{radius:r,color:off?"rgba(255,255,255,.35)":"#fff",weight:off?.4:1,fillColor:color,fillOpacity:off?.25:.9})
       :L.marker([p.lat,p.lon],{zIndexOffset:(off?-5000:0)+Math.round(s.mm*10),icon:L.divIcon({className:"mmlbl",iconSize:null,html:`<span class="${off?"off":""}" style="background:${mmColor(s.mm)}">${Math.round(s.mm)}</span>`})});
     if(mk)mk
-      .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`)
+      .bindTooltip(`<b>${p.name}</b><br>${LV[s.lv]} · ฝน ${s.mm.toFixed(0)} มม. (${s.pr}%)${s.nOver?`<br>🌊 สถานีวัดน้ำล้นตลิ่ง ${s.nOver} แห่ง`:s.nHigh?`<br>💧 ระดับน้ำสูง ${s.nHigh} สถานี`:""}${s.rr?`<br>น้ำในลำน้ำ ${s.rr.toFixed(1)} เท่าของสัปดาห์ก่อน`:""}`)
       .on("click",()=>{openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer);
     if(s.mm>=35&&!off&&!(S.grid&&map.getZoom()>=8))L.marker([p.lat,p.lon],{zIndexOffset:1500+Math.round(s.mm),title:`${p.name} ฝนหนัก ${Math.round(s.mm)} มม.`,
       icon:L.divIcon({className:"rainic"+(s.mm>=90?" big":""),iconSize:null,html:`<span>${s.mm>=90||s.code>=95?"⛈️":"🌧️"}</span>`})})
       .on("click",()=>{openSpot(p.lat,p.lon,p.name);setTab("spot")}).addTo(S.layer);
   });
+  if(S.obs&&S.showObs!==false){const z=map.getZoom();
+    S.obs.forEach(o=>{if(rp&&!rp.some(q=>hav(o.lat,o.lon,q[0],q[1])<15))return;if(!o.over&&z<8)return;
+      L.marker([o.lat,o.lon],{zIndexOffset:o.over?2000+Math.round(o.diff*100):1000,icon:L.divIcon({className:"obsic"+(o.over?" ov":""),iconSize:null,html:`<span>${o.over?"🌊":"💧"}</span>`})})
+        .bindTooltip(`<b>${escH(o.name)}</b>${o.river?` · ${escH(o.river)}`:""}<br>อ.${escH(o.amp)} จ.${escH(o.prov)}<br>${o.over?`<b>ล้นตลิ่ง ${o.diff.toFixed(2)} ม.</b>`:`ใกล้ตลิ่ง (ต่ำกว่า ${o.diff.toFixed(2)} ม.)`} · ${o.rising>0.005?"▲ น้ำขึ้น":o.rising<-0.005?"▼ น้ำลง":"ทรงตัว"}<br><small>สสน. ${new Date(o.time).toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"})} น.</small>`)
+        .addTo(S.layer)})}
   if(S.grid&&map.getZoom()>=8){const bb=map.getBounds().pad(.2);
     S.grid.forEach(g=>{const mm=g.mm[S.day]||0,cd=g.code[S.day];if(mm<35||!bb.contains([g.lat,g.lon]))return;
       if(rp&&!rp.some(q=>hav(g.lat,g.lon,q[0],q[1])<30))return;
@@ -538,7 +575,7 @@ function renderMap(){
     });
   }
   if(S.routeLayer)S.routeLayer.eachLayer(l=>l.bringToFront&&l.bringToFront());
-  $("#legend").innerHTML=`<span>🌧️ ฝนหนัก</span><span>⛈️ หนักมาก/พายุ</span>`+(rp?`<span>วงจาง = นอกเส้นทาง</span>`:"")+(S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]};border-radius:3px;opacity:.85"></i>${l}</span>`).join(""):`<span>ตัวเลข = ฝน มม./วัน</span>`+MMS.map(x=>`<span><i class="dot" style="background:${x[1]};border-radius:3px"></i>${x[2]}</span>`).join(""));
+  $("#legend").innerHTML=(S.obs?`<span>🌊 น้ำล้นตลิ่ง (วัดจริง)</span>`:"")+`<span>🌧️ ฝนหนัก</span><span>⛈️ หนักมาก/พายุ</span>`+(rp?`<span>วงจาง = นอกเส้นทาง</span>`:"")+(S.mode==="risk"?LV.map((l,i)=>`<span><i class="dot" style="background:${LVC[i]};border-radius:3px;opacity:.85"></i>${l}</span>`).join(""):`<span>ตัวเลข = ฝน มม./วัน</span>`+MMS.map(x=>`<span><i class="dot" style="background:${x[1]};border-radius:3px"></i>${x[2]}</span>`).join(""));
 }
 function renderHot(){
   const el=$("#hot");if(!el)return;const hs=hotspots(S.day,null,8);
@@ -780,9 +817,11 @@ function drawTrip(){
   const segsOf=key=>{const out=[];let c=null;res.forEach(r=>{if(r.road&&r.road[key]){if(!c)c={a:r,b:r};else c.b=r}else if(c){out.push(c);c=null}});if(c)out.push(c);return out};
   const segTxt=sg=>sg.map(x=>`${hhmm(x.a.eta)}${x.b!==x.a?"–"+hhmm(x.b.eta):""} น. แถว${escH(x.a.place)}${x.b.place!==x.a.place?"–"+escH(x.b.place):""} (กม. ${x.a.km}${x.b!==x.a?"–"+x.b.km:""})`).join("<br>• ");
   const sS=segsOf("slick"),sV=segsOf("vis"),sF=segsOf("flood");
+  const obsNear=S.obs?S.obs.filter(o=>o.over&&rt.coords.some((c,i)=>i%3===0&&hav(o.lat,o.lon,c[0],c[1])<3)):[];
+  const obsTxt=obsNear.length?`🌊 <b>น้ำล้นตลิ่งจริงใกล้เส้นทาง ${obsNear.length} จุด</b> (สสน.)<br>• ${obsNear.slice(0,5).map(o=>`${escH(o.name)} อ.${escH(o.amp)} จ.${escH(o.prov)} ล้น ${o.diff.toFixed(2)} ม.`).join("<br>• ")}<br>`:"";
   const roadsTxt=rt.roads&&rt.roads.length?`ใช้เส้นทาง: <b>${rt.roads.map(x=>escH(x.lb)).join(" → ")}</b><br>`:"";
-  const roadHtml=miss===res.length?"":`<div class="alert ${sS.length||sV.length||sF.length?"":"ok"}"><b>🛣️ สภาพถนนตลอดเส้นทาง</b><br>${roadsTxt}${
-    !sS.length&&!sV.length&&!sF.length?"🟢 ถนนแห้ง ทัศนวิสัยดี ตลอดเส้นทางถ้าออกเวลานี้":
+  const roadHtml=miss===res.length&&!obsTxt?"":`<div class="alert ${sS.length||sV.length||sF.length||obsTxt?"":"ok"}"><b>🛣️ สภาพถนนตลอดเส้นทาง</b><br>${roadsTxt}${obsTxt}${
+    !sS.length&&!sV.length&&!sF.length?(obsTxt?"":"🟢 ถนนแห้ง ทัศนวิสัยดี ตลอดเส้นทางถ้าออกเวลานี้"):
     (sF.length?`🌊 <b>เสี่ยงน้ำท่วมขัง</b><br>• ${segTxt(sF)}<br>`:"")+(sV.length?`🌫️ <b>ทัศนวิสัยต่ำ</b><br>• ${segTxt(sV)}<br>`:"")+(sS.length?`💧 <b>ถนนเปียก ลื่น</b><br>• ${segTxt(sS)}<br>`:"")+
     `<small>เว้นระยะห่างมากขึ้น เบรกเบาๆ ระวังเส้นสีบนถนนและฝาท่อที่ลื่น${sF.length?" หลีกเลี่ยงน้ำที่ไหลผ่านถนนหรือลึกเกินครึ่งล้อ":""}</small>`}</div>`;const stretches=[];let cur=null;
   res.forEach(r=>{if(wet(r)){if(!cur)cur={a:r,b:r,max:r};else{cur.b=r;if(r.mm>cur.max.mm)cur.max=r}}else if(cur){stretches.push(cur);cur=null}});if(cur)stretches.push(cur);
