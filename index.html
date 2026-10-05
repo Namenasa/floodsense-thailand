@@ -164,6 +164,11 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .ap .go{margin-top:10px;width:100%;background:#D2511C;border:0;color:#fff;border-radius:9px;padding:7px;font-weight:600;cursor:pointer}
 .obsic span{position:absolute;transform:translate(-50%,-50%);font-size:11px;line-height:1;background:rgba(31,111,178,.85);border:1.5px solid #fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.5);cursor:pointer}
 .obsic.ov span{background:#0B4F8A;width:20px;height:20px;font-size:12px;box-shadow:0 0 0 2px rgba(76,155,232,.55),0 1px 3px rgba(0,0,0,.5)}
+.camic span{position:absolute;transform:translate(-50%,-50%);font-size:12px;line-height:1;background:#1F1915;border:1.5px solid #F08A5A;border-radius:6px;padding:3px 3px;box-shadow:0 1px 3px rgba(0,0,0,.6);cursor:pointer}
+.cam video{width:100%;aspect-ratio:16/9;background:#000;border-radius:8px;display:block}
+.cam .st{font-size:12px;color:#A99D92;margin-top:4px}
+.cam .cr{font-size:11px;color:#7d726a;margin-top:4px}
+.ap .camgo{margin-top:8px;width:100%;background:transparent;border:1px solid #F08A5A;color:#F08A5A;border-radius:9px;padding:6px;font-weight:600;cursor:pointer}
 .warnic{position:relative}
 .warnic .pulse{position:absolute;left:-12px;top:-12px;width:24px;height:24px;border-radius:50%;border:3px solid #FF3B3B;box-shadow:0 0 12px #FF3B3B}
 .warnic span{position:absolute;left:0;bottom:8px;transform:translateX(-50%);background:#C4161F;color:#fff;border:1.5px solid #fff;border-radius:8px;padding:2px 8px;font:600 11.5px/1.4 var(--head);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
@@ -298,6 +303,7 @@ body.mapfull{overflow:hidden}
       <button class="btn" id="fullBtn" aria-pressed="false" title="ขยายแผนที่เต็มจอ">⛶ เต็มจอ</button>
       <button class="btn" id="satBtn" aria-pressed="false" title="สลับภาพดาวเทียม">🛰️ ดาวเทียม</button>
       <button class="btn" id="modeBtn" aria-pressed="false">แสดงปริมาณฝน</button>
+      <button class="btn" id="camBtn" aria-pressed="false" title="กล้องจราจร">📷 กล้อง</button>
       <button class="btn" id="radarBtn" aria-pressed="false">เรดาร์</button>
       <button class="btn" id="locBtn" title="ตำแหน่งของฉัน">◎ ตำแหน่งฉัน</button>
     </div>
@@ -478,7 +484,10 @@ function alertPopup(mk,o){
         <a href="https://www.tmd.go.th" target="_blank" rel="noopener">ประกาศกรมอุตุฯ</a>
         <a href="https://www.thaiwater.net" target="_blank" rel="noopener">ThaiWater</a>
         <a href="tel:1784">โทร ปภ. 1784</a></div></div>
-      <button class="go">ดูพยากรณ์ละเอียดของจุดนี้</button>`;
+      <button class="go">ดูพยากรณ์ละเอียดของจุดนี้</button><button class="camgo">📷 ดูกล้องจราจรใกล้จุดนี้</button>`;
+    const cg=d.querySelector(".camgo");cg.onclick=()=>openNearestCam(o.lat,o.lon);
+    loadCams().then(cs=>{const n=cs.reduce((a,c)=>Math.min(a,hav(o.lat,o.lon,c.lat,c.lon)),1e9);
+      if(n>25)cg.remove();else cg.textContent=`📷 ดูกล้องจราจรใกล้สุด (${n<1?Math.round(n*1000)+" ม.":n.toFixed(1)+" กม."})`}).catch(()=>cg.remove());
     d.querySelector(".go").onclick=()=>{map.closePopup();if(document.body.classList.contains("mapfull"))setFull(false);openSpot(o.lat,o.lon,o.title);setTab("spot")};
     const upd=()=>{const pp=mk.getPopup();if(pp&&pp.isOpen())pp.update()};
     const newsP=o.resolve?geoName(o.lat,o.lon).then(g=>{
@@ -550,8 +559,8 @@ function renderMap(){
   if(S.obs&&S.showObs!==false){const z=map.getZoom();
     S.obs.forEach(o=>{if(rp&&!rp.some(q=>hav(o.lat,o.lon,q[0],q[1])<15))return;if(!o.over&&z<8)return;
       L.marker([o.lat,o.lon],{zIndexOffset:o.over?2000+Math.round(o.diff*100):1000,icon:L.divIcon({className:"obsic"+(o.over?" ov":""),iconSize:null,html:`<span>${o.over?"🌊":"💧"}</span>`})})
-        .bindTooltip(`<b>${escH(o.name)}</b>${o.river?` · ${escH(o.river)}`:""}<br>อ.${escH(o.amp)} จ.${escH(o.prov)}<br>${o.over?`<b>ล้นตลิ่ง ${o.diff.toFixed(2)} ม.</b>`:`ใกล้ตลิ่ง (ต่ำกว่า ${o.diff.toFixed(2)} ม.)`} · ${o.rising>0.005?"▲ น้ำขึ้น":o.rising<-0.005?"▼ น้ำลง":"ทรงตัว"}<br><small>สสน. ${new Date(o.time).toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"})} น.</small>`)
-        .addTo(S.layer)})}
+        .bindTooltip(`<b>${escH(o.name)}</b>${o.river?` · ${escH(o.river)}`:""}<br>อ.${escH(o.amp)} จ.${escH(o.prov)}<br>${o.over?`<b>ล้นตลิ่ง ${o.diff.toFixed(2)} ม.</b>`:`ใกล้ตลิ่ง (ต่ำกว่า ${o.diff.toFixed(2)} ม.)`} · ${o.rising>0.005?"▲ น้ำขึ้น":o.rising<-0.005?"▼ น้ำลง":"ทรงตัว"}<br><small>สสน. ${new Date(o.time).toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"})} น.</small><br><small>แตะเพื่อดูกล้องจราจรใกล้จุดนี้</small>`)
+        .on("click",()=>openNearestCam(o.lat,o.lon)).addTo(S.layer)})}
   if(S.grid&&map.getZoom()>=8){const bb=map.getBounds().pad(.2);
     S.grid.forEach(g=>{const mm=g.mm[S.day]||0,cd=g.code[S.day];if(mm<35||!bb.contains([g.lat,g.lon]))return;
       if(rp&&!rp.some(q=>hav(g.lat,g.lon,q[0],q[1])<30))return;
@@ -675,6 +684,48 @@ attachAC($("#from"),x=>{S.from=x.me?{name:"ตำแหน่งของฉั�
 attachAC($("#to"),x=>{S.to=x},{onBlur:()=>{if(S.to)$("#to").value=S.to.name}});
 let searchMk=null;
 const HOME=[13.2,101],HOMEZ=6;
+/* ---------- กล้องจราจร (iTIC / Longdo) ---------- */
+let camOn=false,hlsLib=null;
+async function loadCams(){
+  if(S.cams)return S.cams;const c=cGet("cams",6*3600e3);if(c){S.cams=c;return c}
+  for(const u of ["/api/cams","https://camera.longdo.com/feed/?command=json"]){
+    try{const r=await fetch(u);if(!r.ok)continue;let j=await r.json();if(!Array.isArray(j))continue;
+      if(j.length&&j[0].hls_url!==undefined)j=j.filter(c=>c.hls_url&&!/tempsus/.test(c.hls_url)&&+c.latitude).map(c=>({t:c.title,lat:+c.latitude,lon:+c.longitude,u:c.hls_url,o:c.organization||""}));
+      if(j.length){S.cams=j;cSet("cams",j);return j}}catch(e){}
+  }
+  throw new Error("cams");
+}
+function loadHls(){if(hlsLib)return hlsLib;hlsLib=new Promise((ok,no)=>{const sc=document.createElement("script");sc.src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js";sc.onload=()=>ok(window.Hls);sc.onerror=no;document.head.appendChild(sc)});return hlsLib}
+function camMarker(c){
+  const mk=L.marker([c.lat,c.lon],{zIndexOffset:800,icon:L.divIcon({className:"camic",iconSize:null,html:"<span>📷</span>"})});
+  let hls=null;
+  mk.bindPopup(()=>{const d=document.createElement("div");d.className="cam";
+    d.innerHTML=`<b style="font-family:var(--head)">📷 ${escH(c.t)}</b><video muted playsinline autoplay controls></video><div class="st">กำลังเชื่อมต่อกล้อง…</div><div class="cr">ภาพสดจาก iTIC และหน่วยงานเจ้าของกล้อง${c.o?" ("+escH(c.o)+")":""} ผ่าน Longdo Traffic</div>`;return d},
+    {maxWidth:320,minWidth:260,closeOnClick:false,autoPanPaddingTopLeft:[20,150]});
+  mk.on("popupopen",async e=>{const el=e.popup.getElement();const v=el.querySelector("video"),st=el.querySelector(".st");
+    const live=()=>{st.textContent="● สด";st.style.color="#4CAF7A"},off=()=>{st.textContent="กล้องนี้ออฟไลน์หรือปิดปรับปรุงอยู่ตอนนี้ ลองกล้องตัวอื่นใกล้ๆ";st.style.color="#E0B23A"};
+    v.addEventListener("playing",live,{once:true});v.addEventListener("error",off,{once:true});
+    if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=c.u;v.play().catch(()=>{})}
+    else{try{const H=await loadHls();if(H&&H.isSupported()){hls=new H();hls.on(H.Events.ERROR,(_,dt)=>{if(dt.fatal)off()});hls.loadSource(c.u);hls.attachMedia(v);v.play().catch(()=>{})}else off()}catch(x){off()}}
+    setTimeout(()=>{if(v.readyState<2&&st.textContent.startsWith("กำลัง"))off()},15000);
+  });
+  mk.on("popupclose",e=>{const v=e.popup.getElement()&&e.popup.getElement().querySelector("video");if(hls){hls.destroy();hls=null}if(v){v.pause();v.removeAttribute("src");v.load()}});
+  c.mk=mk;return mk;
+}
+async function setCams(on){
+  camOn=on;const b=$("#camBtn");b.setAttribute("aria-pressed",on);
+  if(S.camLayer){S.camLayer.remove();S.camLayer=null}
+  if(!on){b.textContent="📷 กล้อง";return}
+  b.textContent="📷 กำลังโหลด…";
+  try{const cs=await loadCams();if(!camOn)return;S.camLayer=L.layerGroup(cs.map(camMarker)).addTo(map);b.textContent=`📷 กล้อง ${cs.length}`}
+  catch(e){b.textContent="📷 กล้อง";camOn=false;b.setAttribute("aria-pressed","false");alert("โหลดรายการกล้องไม่สำเร็จ ลองใหม่อีกครั้ง")}
+}
+$("#camBtn").onclick=()=>setCams(!camOn);
+async function openNearestCam(lat,lon){
+  if(!camOn)await setCams(true);if(!S.cams)return;
+  const n=S.cams.reduce((a,c)=>{const d=hav(lat,lon,c.lat,c.lon);return d<a.d?{c,d}:a},{d:1e9});
+  if(!n.c)return;map.closePopup();map.setView([n.c.lat,n.c.lon],Math.max(map.getZoom(),13));setTimeout(()=>n.c.mk&&n.c.mk.openPopup(),400);
+}
 function resetView(){
   map.eachLayer(l=>{if(l.closePopup)l.closePopup()});map.closePopup();
   S.routeData=null;if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;
