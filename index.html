@@ -128,6 +128,8 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .acl{list-style:none;margin:4px 0 0;padding:4px 0;position:absolute;left:0;right:0;top:100%;z-index:700;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);max-height:300px;overflow-y:auto;display:none}
 .msearch .acl{background:#1F1915;color:#F3EDE7;border-color:#3B312A}
 .acl.on{display:block}
+.scroll.acopen{padding-bottom:340px}
+.side .acl{max-height:320px}
 .acl li{padding:8px 12px;cursor:pointer;line-height:1.35}
 .acl li:hover,.acl li.hl{background:var(--soft)}
 .msearch .acl li:hover,.msearch .acl li.hl{background:#2A221C}
@@ -705,6 +707,9 @@ function attachAC(input,onPick,opt={}){
     list.querySelectorAll("li[data-i]").forEach(li=>li.onmousedown=e=>{e.preventDefault();pick(items[+li.dataset.i])});};
   const base=()=>opt.me?[{name:"📍 ตำแหน่งของฉัน",sub:"ใช้ GPS ของเครื่อง",me:true}]:[];
   const pick=x=>{if(x.msg)return;if(x.ext){window.open(x.ext,"_blank","noopener");return}list.classList.remove("on");input.value=x.me?"ตำแหน่งของฉัน":x.name;input.blur();onPick(x)};
+  const sc=input.closest(".scroll");
+  input.addEventListener("focus",()=>{if(sc){sc.classList.add("acopen");setTimeout(()=>input.scrollIntoView({block:"start",behavior:"smooth"}),60)}});
+  input.addEventListener("blur",()=>{if(sc)setTimeout(()=>sc.classList.remove("acopen"),200)});
   input.addEventListener("focus",()=>{input.select();if(!input.value.trim()||opt.me)show(base())});
   input.addEventListener("input",()=>{
     clearTimeout(timer);const q=input.value.trim();if(opt.onType)opt.onType(q);
