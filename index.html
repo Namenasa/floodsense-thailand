@@ -304,7 +304,7 @@ body.mapfull{overflow:hidden}
 
   <div class="mapwrap">
     <div id="map" aria-label="แผนที่ความเสี่ยงฝนและน้ำท่วม"></div>
-    <div class="msearch acw"><input id="msq" type="text" placeholder="🔍 ค้นหาสถานที่ ที่อยู่ ร้าน ปั๊ม…" autocomplete="off" enterkeyhint="search" aria-label="ค้นหาสถานที่"><button class="x" id="msx" aria-label="ล้างคำค้นหา">✕</button><ul class="acl"></ul></div>
+    <div class="msearch acw"><input id="msq" type="text" placeholder="🔍 ค้นหาสถานที่ หรือวางลิงก์ Google Maps" autocomplete="off" enterkeyhint="search" aria-label="ค้นหาสถานที่"><button class="x" id="msx" aria-label="ล้างคำค้นหา">✕</button><ul class="acl"></ul></div>
     <div class="mapctl">
       <button class="btn" id="resetBtn" style="display:none" title="ล้างเส้นทางและกลับไปดูทั้งประเทศ">↺ ทั้งประเทศ</button>
       <button class="btn" id="fullBtn" aria-pressed="false" title="ขยายแผนที่เต็มจอ">⛶ เต็มจอ</button>
@@ -658,17 +658,41 @@ async function photonSearch(q){
   return j.features.map(f=>{const pr=f.properties;const sub=[pr.street,pr.district,pr.city||pr.county,pr.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i&&v!==pr.name).join(", ");
     return{name:pr.name||[pr.street,pr.housenumber].filter(Boolean).join(" ")||sub,sub,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}}).filter(x=>x.name);
 }
+function parseGmaps(u){
+  try{u=decodeURIComponent(u)}catch(e){}
+  let m=u.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)||u.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)||u.match(/[?&](?:q|query|ll|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
+  if(!m)return null;const nm=(u.match(/\/place\/([^/@]+)/)||[])[1];
+  return{name:nm?nm.replace(/\+/g," "):"จุดจากลิงก์ Google Maps",sub:`${(+m[1]).toFixed(5)}, ${(+m[2]).toFixed(5)}`,lat:+m[1],lon:+m[2]};
+}
+let longdoOff=false;
+async function longdoSearch(q){
+  if(longdoOff)return[];const c=map.getCenter();
+  const r=await fetch(`/api/search?q=${encodeURIComponent(q)}&lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}`);
+  if(r.status===501||r.status===404){longdoOff=true;return[]}
+  if(!r.ok)return[];const j=await r.json();return Array.isArray(j)?j:[];
+}
 async function searchPlaces(q){
-  const qq=q.trim().toLowerCase(),th=isThai(q);
-  const local=PROV.filter(p=>p.name.toLowerCase().includes(qq)).slice(0,4).map(p=>({name:p.name,sub:"จังหวัด (ตัวเมือง)",lat:p.lat,lon:p.lon}));
-  const [n,ph]=await Promise.allSettled([nomSearch(q),photonSearch(q)]);
+  const raw=q.trim(),qq=raw.toLowerCase(),th=isThai(q);
+  // 1) พิกัดตรงๆ เช่น 14.84, 99.69
+  const co=raw.match(/^(-?\d{1,2}\.\d+)\s*[, ]\s*(-?\d{1,3}\.\d+)$/);
+  if(co)return[{name:"พิกัดที่พิมพ์",sub:`${co[1]}, ${co[2]}`,lat:+co[1],lon:+co[2]}];
+  // 2) ลิงก์ Google Maps (รวมลิงก์ย่อจากปุ่มแชร์)
+  if(/^https?:\/\//i.test(raw)&&/goo\.gl|google\./i.test(raw)){
+    let g=parseGmaps(raw);
+    if(!g){try{const r=await fetch(`/api/resolve?u=${encodeURIComponent(raw)}`);if(r.ok){const j=await r.json();g=parseGmaps(j.url||"")}}catch(e){}}
+    return g?[g]:[{name:"อ่านพิกัดจากลิงก์นี้ไม่ได้",sub:"ใน Google Maps กดค้างที่จุดนั้น แล้วคัดลอกพิกัดมาวางแทน",msg:true}];
+  }
+  const local=PROV.filter(p=>p.name.toLowerCase().includes(qq)).slice(0,3).map(p=>({name:p.name,sub:"จังหวัด (ตัวเมือง)",lat:p.lat,lon:p.lon}));
+  const [ld,n,ph]=await Promise.allSettled([longdoSearch(q),nomSearch(q),photonSearch(q)]);
+  const L0=ld.status==="fulfilled"?ld.value:[];
   let A=n.status==="fulfilled"?n.value:[],B=ph.status==="fulfilled"?ph.value:[];
-  // ภาษาไทยไม่มีเว้นวรรค ถ้ายังไม่เจอ ลองตัดคำนำหน้าที่พบบ่อยแล้วค้นใหม่
-  if(th&&!A.length&&!B.length){
+  if(th&&!L0.length&&!A.length&&!B.length){
     const q2=q.replace(/^(ร้าน|ปั๊ม|วัด|โรงเรียน|โรงพยาบาล|ตลาด|อำเภอ|อ\.|จังหวัด|จ\.)\s*/,"").trim();
     if(q2&&q2!==q){try{A=await nomSearch(q2)}catch(e){}}
   }
-  const remote=(th?A.concat(B):B.concat(A));
+  // เรียงผลที่ใกล้จุดที่ดูแผนที่อยู่ขึ้นก่อน (เหมือน Google Maps)
+  const c=map.getCenter();const near=a=>a.map(x=>({...x,_d:hav(c.lat,c.lng,x.lat,x.lon)}));
+  const remote=L0.concat(near(th?A.concat(B):B.concat(A)).sort((a,b)=>a._d-b._d));
   const out=[];for(const r of local.concat(remote)){if(!out.some(o=>hav(o.lat,o.lon,r.lat,r.lon)<0.3&&(o.name===r.name||hav(o.lat,o.lon,r.lat,r.lon)<0.05)))out.push(r)}
   return out.slice(0,10);
 }
@@ -680,14 +704,15 @@ function attachAC(input,onPick,opt={}){
     list.classList.toggle("on",!!(arr.length||msg));
     list.querySelectorAll("li[data-i]").forEach(li=>li.onmousedown=e=>{e.preventDefault();pick(items[+li.dataset.i])});};
   const base=()=>opt.me?[{name:"📍 ตำแหน่งของฉัน",sub:"ใช้ GPS ของเครื่อง",me:true}]:[];
-  const pick=x=>{list.classList.remove("on");input.value=x.me?"ตำแหน่งของฉัน":x.name;input.blur();onPick(x)};
+  const pick=x=>{if(x.msg)return;if(x.ext){window.open(x.ext,"_blank","noopener");return}list.classList.remove("on");input.value=x.me?"ตำแหน่งของฉัน":x.name;input.blur();onPick(x)};
   input.addEventListener("focus",()=>{input.select();if(!input.value.trim()||opt.me)show(base())});
   input.addEventListener("input",()=>{
     clearTimeout(timer);const q=input.value.trim();if(opt.onType)opt.onType(q);
     if(q.length<2){show(base());return}
     show(base(),"กำลังค้นหา…");
     timer=setTimeout(async()=>{const my=++seq;const r=await searchPlaces(q);if(my!==seq)return;
-      show(base().concat(r),r.length?"":"ไม่พบสถานที่ ลองพิมพ์ชื่ออื่น หรือใส่ชื่ออำเภอ/จังหวัดต่อท้าย")},isThai(q)?600:380);
+      const gm={name:"🔎 ค้นต่อใน Google Maps",sub:"เจอแล้วกด แชร์ → คัดลอกลิงก์ แล้วมาวางที่ช่องนี้",ext:`https://www.google.com/maps/search/${encodeURIComponent(q)}`};
+      show(base().concat(r,/^https?:|^-?\d/.test(q)?[]:[gm]),r.length?"":"ไม่พบในฐานข้อมูลแผนที่ ลองค้นต่อใน Google Maps ด้านล่าง")},isThai(q)?600:380);
   });
   input.addEventListener("keydown",e=>{
     const lis=list.querySelectorAll("li[data-i]");
