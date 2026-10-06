@@ -200,6 +200,13 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 }
 @keyframes splIn{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:none}}
 @keyframes splPulse{0%,100%{opacity:.55}50%{opacity:1}}
+.startdep{margin-top:-2px;padding:8px;border-radius:10px;background:var(--soft);border:1px solid var(--brand)}
+.startdep .sdrow{display:grid;grid-template-columns:auto 1fr 104px;gap:6px;align-items:center;font-size:.84rem;margin-bottom:6px}
+.startdep input{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px;color:var(--fg);min-width:0;font:inherit}
+.arrnote{margin-top:-2px;padding:8px 10px;border-radius:10px;background:var(--soft);border:1px dashed var(--line);font-size:.86rem;color:var(--muted)}
+.arrnote.on{border:1px solid var(--l0);color:var(--fg)}
+.arrbig{margin:8px 0 2px;padding:10px 12px;border-radius:12px;background:rgba(62,155,107,.14);border:1px solid var(--l0);font-size:.95rem}
+.arrbig b{font-family:var(--head);font-size:1.08rem}
 .stopwrap{margin-bottom:8px}
 .stopdep{display:grid;grid-template-columns:auto 1fr 104px;gap:6px;align-items:center;margin-top:6px;padding:8px;border-radius:10px;background:var(--soft);border:1px dashed var(--line);font-size:.84rem}
 .stopdep.on{border-color:var(--brand)}
@@ -292,12 +299,14 @@ body.mapfull{overflow:hidden}
       <section class="pane on" id="p-trip">
         <div class="form">
           <div class="acw full"><span class="cap">ต้นทาง</span><input id="from" autocomplete="off" placeholder="พิมพ์ที่อยู่ สถานที่ หรือจังหวัด"><ul class="acl"></ul></div>
+          <div class="full startdep">
+            <div class="sdrow"><span>🏍️ ออกจากต้นทาง</span><input type="date" id="tday" aria-label="วันที่ออกจากต้นทาง"><input type="time" id="ttime" value="07:00" step="900" aria-label="เวลาออกจากต้นทาง"></div>
+            <div class="dchips" id="dchips"></div><div class="dnote" id="dnote"></div>
+          </div>
           <div id="stops" class="full"></div>
           <button class="btn full addstop" id="addStop" type="button">＋ เพิ่มจุดแวะ</button>
           <div class="acw full"><span class="cap">ปลายทาง</span><input id="to" autocomplete="off" placeholder="พิมพ์ที่อยู่ สถานที่ หรือจังหวัด"><ul class="acl"></ul></div>
-          <label>วันเดินทาง<input type="date" id="tday"></label>
-          <label>เวลาออก<input type="time" id="ttime" value="07:00" step="900"></label>
-          <div class="full dinfo"><div class="dchips" id="dchips"></div><div class="dnote" id="dnote"></div></div>
+          <div class="full arrnote" id="arrNote">🏁 เวลาถึงปลายทางจะคำนวณให้หลังกดตรวจเส้นทาง</div>
           <label class="full">ความเร็วเฉลี่ย (รวมพัก)
             <select id="speed">
               <option value="1">ตามเวลาขับปกติ</option>
@@ -834,6 +843,7 @@ async function openNearestCam(lat,lon){
   if(!n.c)return;map.closePopup();map.setView([n.c.lat,n.c.lon],Math.max(map.getZoom(),13));setTimeout(()=>n.c.mk&&n.c.mk.openPopup(),400);
 }
 function resetView(){
+  {const an=$("#arrNote");an.classList.remove("on");an.textContent="🏁 เวลาถึงปลายทางจะคำนวณให้หลังกดตรวจเส้นทาง"}
   map.eachLayer(l=>{if(l.closePopup)l.closePopup()});map.closePopup();
   S.routeData=null;if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;
   if(searchMk){searchMk.remove();searchMk=null}if(S.spotMk){S.spotMk.remove();S.spotMk=null}
@@ -993,6 +1003,10 @@ function drawTrip(){
   const {res,miss,T}=evalDepart(dep);HH=d=>fmtT(d,dep);
   const wxAt=(r,d)=>{const h=r&&r.h&&r.h[bkKey(d)];return h?`${wIcon(h.c,h.mm)} <em>${h.mm.toFixed(1)} มม./ชม.</em> โอกาสฝน ${h.pr}%`:"ยังไม่มีพยากรณ์"};
   const fullT=d=>new Date(d).toLocaleDateString("th-TH",{weekday:"short",day:"numeric",month:"short",timeZone:"Asia/Bangkok"})+" "+hhmm(d)+" น.";
+  const arrive0=T.end,tot0=(arrive0-dep)/1000;
+  const totTxt=`${tot0>=86400?Math.floor(tot0/86400)+" วัน ":""}${Math.floor(tot0%86400/3600)} ชม. ${Math.round(tot0%3600/60)} นาที`;
+  const arrHtml=`<div class="arrbig">🏁 ถึง ${escH(toName)} <b>${fullT(arrive0)}</b><br><small>ออก ${fullT(dep)} · รวม ${totTxt} · ${Math.round(rt.km)} กม.</small></div>`;
+  const an=$("#arrNote");an.classList.add("on");an.innerHTML=`🏁 ถึงปลายทางประมาณ <b>${fullT(arrive0)}</b> (รวม ${totTxt})`;
   const nodes=[res[0],...res.filter(r=>r.stop),res[res.length-1]];
   const legOf=(a,b)=>{const K=r=>r.kmx??r.km;const seg=res.filter(r=>(r===a&&!a.stop||K(r)>K(a)+1e-6)&&K(r)<=K(b)+1e-6&&!r.nodata);if(!seg.length)return{txt:"ยังไม่มีพยากรณ์",wet:false};
     const w=seg.filter(r=>r.mm>=0.5||r.pr>=60);const mx=seg.reduce((x,r)=>r.mm>x.mm?r:x,seg[0]);
@@ -1043,7 +1057,7 @@ function drawTrip(){
   $("#trip").innerHTML=`<div class="card">
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:start"><h3>${fromName} ถึง ${toName}</h3><button class="btn" id="clearRt" style="padding:3px 10px;font-size:.85rem">ล้างเส้นทาง</button></div>
     <div class="meta">${Math.round(rt.km)} กม. ออก ${HH(dep)} น. ถึงประมาณ ${fmtT(arrive,dep)} น. (${tot>=86400?Math.floor(tot/86400)+" วัน ":""}${Math.floor(tot%86400/3600)} ชม. ${Math.round(tot%3600/60)} นาที${rt.nStops?` รวมแวะ ${rt.nStops} จุด${rt.wait?` พัก ${rt.wait} นาที`:""}${rt.nNight?` กำหนดวันออก ${rt.nNight} จุด`:""}`:""})${rt.approx?" · ระยะทางโดยประมาณ":""}</div>
-    ${itinHtml}${sumHtml}${roadHtml}${bestHtml}${chart}
+    ${arrHtml}${itinHtml}${sumHtml}${roadHtml}${bestHtml}${chart}
     ${miss===res.length?`<div class="alert">ยังไม่มีพยากรณ์ฝนของวันที่เลือก (ดูได้ล่วงหน้า ${FC_DAYS} วัน) เวลาผ่านแต่ละจุดคำนวณให้แล้ว กลับมากดตรวจอีกครั้งเมื่อใกล้วันเดินทาง</div>`:miss?`<p class="hint">บางช่วงเกินระยะพยากรณ์ที่มี จะแสดงเป็น "ไม่มีข้อมูล"</p>`:""}
     <ul class="tl">${res.map((r,ri)=>`${!r.nodata&&ri>0&&dKey(r.eta)!==dKey(res[ri-1].eta)||(ri>0&&dKey(r.eta)!==dKey(res[ri-1].eta))?`<li class="day">📅 ${fmtDate(dKey(r.eta))}</li>`:""}<li class="${hasWorst&&r===worst?"worst":r.stop?"stop":""}"><span class="t">${hhmm(r.eta)}</span><i class="bul" style="background:${r.nodata?"#777":r.mm>=5?"#D9313A":r.mm>=1?"#E06B24":wet(r)?"#D9A21B":"#3E9B6B"}"></i>
       <span class="pl">${hasWorst&&r===worst?"⚠️ ":""}${r.stop?"☕ แวะ "+escH(r.place):escH(r.place)}<small>กม. ${r.km}${r.stop?` · ${(rt.stopInfo[r.stop.j]||{}).custom?`📅 ออก `:r.stop.wait?`พัก ${r.stop.wait} นาที ออก ${fmtT(new Date(T.depStop[r.stop.j]),dep)} น.`:"ผ่านเฉยๆ"}`:r.frac===0?" · ออกเดินทาง":r.frac===1?" · ถึงปลายทาง":""}${r.road?`<br>${r.road.flood?"🌊 เสี่ยงน้ำขัง":r.road.vis?"🌫️ ทัศนวิสัยต่ำ":r.road.slick?"💧 ถนนเปียก ลื่น":"🟢 ถนนแห้ง"}`:""}</small></span>
