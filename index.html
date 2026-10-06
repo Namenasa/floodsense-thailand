@@ -211,6 +211,9 @@ h1,h2,h3{font-family:var(--head);margin:0;line-height:1.25}
 .stopdep{display:grid;grid-template-columns:auto 1fr 104px;gap:6px;align-items:center;margin-top:6px;padding:8px;border-radius:10px;background:var(--soft);border:1px dashed var(--line);font-size:.84rem}
 .stopdep.on{border-color:var(--brand)}
 .stopdep small{grid-column:1/-1;color:var(--muted);font-size:.76rem}
+.stopinfo{grid-column:1/-1;font-size:.8rem;color:var(--muted);line-height:1.45}
+.stopinfo:empty{display:none}
+.stopinfo.bad{color:#FF8A80}.stopinfo.fix{color:#8FD9A8}
 .stopdep .lnk{background:none;border:0;color:var(--brand2);text-decoration:underline;cursor:pointer;padding:0 4px;font-size:.76rem}
 .stoprow select:disabled{opacity:.45}
 .itin{margin-top:10px;background:var(--panel);border-radius:12px;padding:10px 12px;border:1px solid var(--line)}
@@ -843,6 +846,7 @@ async function openNearestCam(lat,lon){
   if(!n.c)return;map.closePopup();map.setView([n.c.lat,n.c.lon],Math.max(map.getZoom(),13));setTimeout(()=>n.c.mk&&n.c.mk.openPopup(),400);
 }
 function resetView(){
+  S.stopArr=null;setTimeout(updateStopHints,0);
   {const an=$("#arrNote");an.classList.remove("on");an.textContent="🏁 เวลาถึงปลายทางจะคำนวณให้หลังกดตรวจเส้นทาง"}
   map.eachLayer(l=>{if(l.closePopup)l.closePopup()});map.closePopup();
   S.routeData=null;if(S.routeLayer)S.routeLayer.remove();S.routeLayer=null;
@@ -919,18 +923,38 @@ async function getRoute(P){
     return{coords:P,km:legs.reduce((a,l)=>a+l.km,0),sec:legs.reduce((a,l)=>a+l.sec,0),legs,approx:true}}
 }
 const escH=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const snapTime=a=>new Date(Math.ceil((a+15*60e3)/(15*60e3))*15*60e3);
+function updateStopHints(){
+  document.querySelectorAll(".stopinfo[data-si]").forEach(el=>{const i=+el.dataset.si,st=S.stops[i],a=S.stopArr&&S.stopArr[i];
+    const ddEl=document.querySelector(`input[data-dd="${i}"]`);
+    if(!a||!st||!st.place){el.innerHTML="";el.className="stopinfo";return}
+    if(ddEl)ddEl.min=dKey(new Date(a));
+    const at=new Date(a),ok=snapTime(a);
+    let h=`🕒 ไปถึงจุดนี้ประมาณ <b>${fmtT(at,new Date(Date.parse(($("#tday").value||todayISO())+"T00:00:00+07:00")))} น.</b> · ออกได้เร็วสุด ${hhmm(ok)} น.${dKey(ok)!==dKey(at)?" ("+fmtDate(dKey(ok),{day:"numeric",month:"short"})+")":""}`;
+    let cls="stopinfo";
+    if(st.dd){const c=Date.parse(`${st.dd}T${st.dt||"07:00"}:00+07:00`);
+      if(c<a){cls+=" bad";h+=`<br>⚠️ เวลาออกที่ตั้งไว้เร็วกว่าเวลาที่ไปถึง แอปจะคำนวณให้ออก ${hhmm(ok)} น. แทน <button type="button" class="lnk" data-fix="${i}">ปรับให้ตรง</button>`}
+      else if(st.snapped){cls+=" fix";h+=`<br>✅ ปรับเวลาออกให้หลังเวลาที่ไปถึงแล้ว`}}
+    el.className=cls;el.innerHTML=h;
+    const fx=el.querySelector("[data-fix]");if(fx)fx.onclick=()=>{st.dd=dKey(ok);st.dt=hhmm(ok);st.snapped=true;renderStops();if(S.routeData)planTrip()};
+  });
+}
 function renderStops(){
   const td=$("#tday").value||todayISO();
   $("#stops").innerHTML=S.stops.map((s,i)=>`<div class="stopwrap"><div class="stoprow"><div class="acw"><span class="cap">จุดแวะ ${i+1}</span><input data-i="${i}" autocomplete="off" placeholder="พิมพ์สถานที่ที่จะแวะ" value="${s.place?escH(s.place.name):""}"><ul class="acl"></ul></div>
     <select data-w="${i}" aria-label="เวลาพักที่จุดแวะ ${i+1}" ${s.dd?"disabled":""}>${[0,15,30,45,60,90,120].map(m=>`<option value="${m}" ${m===s.wait?"selected":""}>${m?"พัก "+m+" นาที":"ผ่านเฉยๆ"}</option>`).join("")}</select>
     <button class="btn" type="button" data-x="${i}" aria-label="ลบจุดแวะ ${i+1}">✕</button></div>
     <div class="stopdep${s.dd?" on":""}"><span>📅 ออกจากจุดนี้</span><input type="date" data-dd="${i}" value="${s.dd||""}" min="${td}" aria-label="วันที่ออกจากจุดแวะ ${i+1}"><input type="time" data-dt="${i}" value="${s.dt||""}" step="900" aria-label="เวลาออกจากจุดแวะ ${i+1}">
-      <small>${s.dd?`กำหนดวันออกเอง (ค้างคืนได้) <button type="button" class="lnk" data-clr="${i}">ล้าง</button>`:"เว้นว่าง = ออกต่อหลังพักตามเวลาที่เลือก"}</small></div></div>`).join("");
+      <small>${s.dd?`กำหนดวันออกเอง (ค้างคืนได้) <button type="button" class="lnk" data-clr="${i}">ล้าง</button>`:"เว้นว่าง = ออกต่อหลังพักตามเวลาที่เลือก"}</small>
+      <div class="stopinfo" data-si="${i}"></div></div></div>`).join("");
+  updateStopHints();
   $("#stops").querySelectorAll("input[data-i]").forEach(inp=>{const i=+inp.dataset.i;
     attachAC(inp,x=>{if(S.stops[i])S.stops[i].place=x},{onBlur:()=>{if(S.stops[i]&&S.stops[i].place)inp.value=S.stops[i].place.name}})});
   $("#stops").querySelectorAll("select[data-w]").forEach(sel=>sel.onchange=()=>{S.stops[+sel.dataset.w].wait=+sel.value;if(S.routeData)planTrip()});
   $("#stops").querySelectorAll("input[data-dd],input[data-dt]").forEach(el=>el.onchange=()=>{const k=+(el.dataset.dd??el.dataset.dt),st=S.stops[k];
     if(el.dataset.dd!==undefined){st.dd=el.value;if(st.dd&&!st.dt)st.dt="07:00"}else{st.dt=el.value;if(st.dt&&!st.dd)st.dd=$("#tday").value||todayISO()}
+    const a=S.stopArr&&S.stopArr[k];st.snapped=false;
+    if(a&&st.dd){const c=Date.parse(`${st.dd}T${st.dt||"07:00"}:00+07:00`);if(c<a){const e=snapTime(a);st.dd=dKey(e);st.dt=hhmm(e);st.snapped=true}}
     renderStops();if(S.routeData)planTrip()});
   $("#stops").querySelectorAll("button[data-clr]").forEach(b=>b.onclick=()=>{const st=S.stops[+b.dataset.clr];st.dd="";st.dt="";renderStops();if(S.routeData)planTrip()});
   $("#stops").querySelectorAll("button[data-x]").forEach(b=>b.onclick=()=>{S.stops.splice(+b.dataset.x,1);renderStops();if(S.routeData)planTrip()});
@@ -959,7 +983,7 @@ async function planTrip(){
     rt.tAt=km=>{let i=0;while(i<rt.legs.length-1&&km>lb[i+1]+1e-6)i++;let t=0;for(let k=0;k<i;k++)t+=rt.legs[k].sec;
       const L_=rt.legs[i];t+=L_.km?Math.min(1,Math.max(0,(km-lb[i])/L_.km))*L_.sec:0;
       stops.forEach((st,j)=>{if(lb[j+1]<km-0.01&&!st.dd)t+=st.wait*60});return t};
-    rt.lb=lb;rt.stopInfo=stops.map(st=>({custom:!!st.dd,wait:st.wait||0,dd:st.dd,dt:st.dt,name:st.place.name}));
+    rt.stopIdx=S.stops.map((x,i)=>x.place?i:-1).filter(i=>i>=0);rt.lb=lb;rt.stopInfo=stops.map(st=>({custom:!!st.dd,wait:st.wait||0,dd:st.dd,dt:st.dt,name:st.place.name}));
     rt.total=rt.tAt(lb[lb.length-1]);rt.nStops=stops.length;rt.wait=stops.reduce((a,x)=>a+(x.dd?0:x.wait),0);rt.nNight=stops.filter(x=>x.dd).length;
     const pts=sampleRoute(rt.coords,rt.km);pts.forEach(p=>{p.km=p.frac*rt.km;p.tsec=rt.tAt(p.km)});
     stops.forEach((st,i)=>{const km=lb[i+1],lat=st.place.lat,lon=st.place.lon;let bi=0,bd=1e9;
@@ -977,14 +1001,14 @@ async function planTrip(){
 }
 function makeTimer(dep){
   const rt=S.routeData.rt,lb=rt.lb||[0,rt.km],si=rt.stopInfo||[],legs=rt.legs||[{km:rt.km,sec:rt.sec}];
-  const start=[dep.getTime()],arr=[],depStop=[];
+  const start=[dep.getTime()],arr=[],depStop=[],lateArr=[];
   for(let j=0;j<legs.length;j++){const a=start[j]+legs[j].sec*1000;
     if(j<si.length){arr.push(a);const s=si[j];let d=a+(s.custom?0:s.wait*60e3);
-      if(s.custom&&s.dd){const c=Date.parse(`${s.dd}T${s.dt||"07:00"}:00+07:00`);if(c>a)d=c}
-      depStop.push(d);start.push(d)}else arr.push(a)}
+      let late=false;if(s.custom&&s.dd){const c=Date.parse(`${s.dd}T${s.dt||"07:00"}:00+07:00`);if(c>a)d=c;else{late=true;d=snapTime(a).getTime()}}
+      depStop.push(d);start.push(d);lateArr.push(late)}else arr.push(a)}
   const at=km=>{let i=0;while(i<legs.length-1&&km>lb[i+1]+1e-6)i++;const L_=legs[i];
     return new Date(start[i]+(L_.km?Math.min(1,Math.max(0,(km-lb[i])/L_.km)):0)*L_.sec*1000)};
-  return{at,end:new Date(arr[arr.length-1]),depStop};
+  return{at,end:new Date(arr[arr.length-1]),depStop,stopArr:arr.slice(0,si.length),late:lateArr};
 }
 const dKey=x=>new Date(x.getTime()+7*3600e3).toISOString().slice(0,10);
 function fmtT(d,ref){return dKey(d)===dKey(ref)?hhmm(d):new Date(d).toLocaleDateString("th-TH",{day:"numeric",month:"short",timeZone:"Asia/Bangkok"})+" "+hhmm(d)}
@@ -1001,6 +1025,7 @@ function drawTrip(){
   const day=$("#tday").value,tm=$("#ttime").value||"07:00";
   const dep=new Date(`${day}T${tm}:00+07:00`);
   const {res,miss,T}=evalDepart(dep);HH=d=>fmtT(d,dep);
+  S.stopArr={};(rt.stopIdx||[]).forEach((i,j)=>{S.stopArr[i]=T.stopArr[j]});updateStopHints();
   const wxAt=(r,d)=>{const h=r&&r.h&&r.h[bkKey(d)];return h?`${wIcon(h.c,h.mm)} <em>${h.mm.toFixed(1)} มม./ชม.</em> โอกาสฝน ${h.pr}%`:"ยังไม่มีพยากรณ์"};
   const fullT=d=>new Date(d).toLocaleDateString("th-TH",{weekday:"short",day:"numeric",month:"short",timeZone:"Asia/Bangkok"})+" "+hhmm(d)+" น.";
   const arrive0=T.end,tot0=(arrive0-dep)/1000;
@@ -1017,7 +1042,7 @@ function drawTrip(){
       const out=n.stop?new Date(T.depStop[n.stop.j]):null;
       const row=`<div class="nd"><span class="ic">${first?"🏍️":last?"🏁":si&&si.custom?"🛏️":"☕"}</span><div><b>${first?"ออกจาก ":last?"ถึง ":`จุดแวะ ${n.stop.j+1} · `}${escH(n.place)}</b><br>
         ${first?`<span class="w">ออก ${fullT(n.eta)} · ${wxAt(n,n.eta)}</span>`:last?`<span class="w">ถึง ${fullT(n.eta)} · ${wxAt(n,n.eta)}</span>`:
-        `<span class="w">ถึง ${fullT(n.eta)} · ${wxAt(n,n.eta)}</span><br><span class="w">ออก ${fullT(out)}${si.custom?" (กำหนดเอง)":n.stop.wait?` (พัก ${n.stop.wait} นาที)`:""} · ${wxAt(n,out)}</span>`}</div></div>`;
+        `<span class="w">ถึง ${fullT(n.eta)} · ${wxAt(n,n.eta)}</span><br><span class="w">ออก ${fullT(out)}${si.custom?(T.late[n.stop.j]?" (ปรับตามเวลาที่ไปถึง)":" (กำหนดเอง)"):n.stop.wait?` (พัก ${n.stop.wait} นาที)`:""} · ${wxAt(n,out)}</span>`}</div></div>`;
       const lg=last?"":(()=>{const L=legOf(n,nodes[k+1]);return`<div class="lg${L.wet?" wet":""}">${L.txt}</div>`})();
       return row+lg}).join("")}</div>`;
   const sev=r=>r.mm+r.pr/100*.6;
